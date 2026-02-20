@@ -43,7 +43,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ОТВЕТАМИ - УПРОЩЁННО)")
+print("🚀 МОСТ MAX → TELEGRAM (С ОТВЕТАМИ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -74,6 +74,20 @@ while True:
                 if chat_id == MAX_CHAT_ID:
                     print("✅ Сообщение из нужного чата!")
                     
+                    # 👇 ОПРЕДЕЛЯЕМ, ЕСТЬ ЛИ ОТВЕТ (ТОЛЬКО ЭТО ДОБАВЛЕНО)
+                    reply_info = ""
+                    if 'quotedMessage' in message_data:
+                        quoted = message_data['quotedMessage']
+                        quoted_text = quoted.get('textMessage', '')
+                        quoted_sender = quoted.get('senderName', '')
+                        
+                        if quoted_text:
+                            if quoted_sender:
+                                reply_info = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
+                            else:
+                                reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
+                            print(f"↪️ Это ответ на: {quoted_text[:50]}...")
+                    
                     # Определяем тип сообщения
                     msg_type = message_data.get('typeMessage', '')
                     
@@ -86,21 +100,7 @@ while True:
                             print(f"👤 От: {sender_name}")
                             print(f"📝 Текст: {text}")
                             
-                            # 👇 ПРОВЕРЯЕМ, ЕСТЬ ЛИ ОТВЕТ (ЦИТИРОВАНИЕ)
-                            reply_info = ""
-                            if 'quotedMessage' in message_data:
-                                quoted = message_data['quotedMessage']
-                                quoted_text = quoted.get('textMessage', '')
-                                quoted_sender = quoted.get('senderName', '')
-                                
-                                if quoted_text:
-                                    if quoted_sender:
-                                        reply_info = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
-                                    else:
-                                        reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
-                                    print(f"↪️ Это ответ на: {quoted_text[:50]}...")
-                            
-                            # Формируем сообщение для Telegram
+                            # 👇 ДОБАВЛЯЕМ ОТВЕТ В СООБЩЕНИЕ
                             full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
                             
                             # Отправляем в Telegram
@@ -131,29 +131,18 @@ while True:
                             print(f"👤 От: {sender_name}")
                             print(f"{file_type}: {file_name}")
                             
-                            # 👇 ПРОВЕРЯЕМ ОТВЕТ ДЛЯ МЕДИА
-                            reply_info = ""
-                            if 'quotedMessage' in message_data:
-                                quoted = message_data['quotedMessage']
-                                quoted_text = quoted.get('textMessage', '')
-                                quoted_sender = quoted.get('senderName', '')
-                                
-                                if quoted_text:
-                                    if quoted_sender:
-                                        reply_info = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
-                                    else:
-                                        reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
-                            
                             # Скачиваем файл
                             file_response = requests.get(download_url)
                             
                             if file_response.status_code == 200:
+                                # 👇 ДОБАВЛЯЕМ ОТВЕТ В ПОДПИСЬ
+                                full_caption = f"{reply_info}📨 MAX от {sender_name}"
+                                if caption:
+                                    full_caption += f"\n{caption}"
+                                
                                 if msg_type == 'imageMessage':
                                     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
                                     files = {'photo': (file_name, file_response.content)}
-                                    full_caption = f"{reply_info}📨 MAX от {sender_name}"
-                                    if caption:
-                                        full_caption += f"\n{caption}"
                                     data = {
                                         'chat_id': TELEGRAM_CHAT_ID,
                                         'caption': full_caption
@@ -163,9 +152,6 @@ while True:
                                 else:
                                     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
                                     files = {'document': (file_name, file_response.content)}
-                                    full_caption = f"{reply_info}📨 MAX от {sender_name}\n{file_type}"
-                                    if caption:
-                                        full_caption += f"\n{caption}"
                                     data = {
                                         'chat_id': TELEGRAM_CHAT_ID,
                                         'caption': full_caption
