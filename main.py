@@ -43,7 +43,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ОТВЕТАМИ - УПРОЩЁННО)")
+print("🚀 МОСТ MAX → TELEGRAM (ПОЛНОЕ ЛОГИРОВАНИЕ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -76,6 +76,11 @@ while True:
                     
                     # Определяем тип сообщения
                     msg_type = message_data.get('typeMessage', '')
+                    print(f"📌 Тип сообщения: {msg_type}")
+                    
+                    # Проверяем, есть ли ответ
+                    if 'quotedMessage' in message_data:
+                        print("📎 Это ответ на другое сообщение")
                     
                     # 📝 ТЕКСТОВЫЕ СООБЩЕНИЯ
                     if msg_type == 'textMessage' and 'textMessageData' in message_data:
@@ -86,7 +91,7 @@ while True:
                             print(f"👤 От: {sender_name}")
                             print(f"📝 Текст: {text}")
                             
-                            # 👇 ПРОВЕРЯЕМ, ЕСТЬ ЛИ ОТВЕТ (ЦИТИРОВАНИЕ)
+                            # Проверяем ответ
                             reply_info = ""
                             if 'quotedMessage' in message_data:
                                 quoted = message_data['quotedMessage']
@@ -98,9 +103,7 @@ while True:
                                         reply_info = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
                                     else:
                                         reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
-                                    print(f"↪️ Это ответ на: {quoted_text[:50]}...")
                             
-                            # Формируем сообщение для Telegram
                             full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
                             
                             # Отправляем в Telegram
@@ -109,8 +112,12 @@ while True:
                                 "chat_id": TELEGRAM_CHAT_ID,
                                 "text": full_message
                             }
-                            requests.post(tg_url, json=tg_data)
-                            print("✅ Текст отправлен в Telegram!")
+                            tg_response = requests.post(tg_url, json=tg_data)
+                            
+                            if tg_response.status_code == 200:
+                                print("✅ Текст отправлен в Telegram!")
+                            else:
+                                print(f"❌ Ошибка Telegram: {tg_response.status_code} - {tg_response.text}")
                     
                     # 🖼️ МЕДИА СООБЩЕНИЯ
                     elif msg_type in ['imageMessage', 'videoMessage', 'documentMessage', 'audioMessage']:
@@ -130,8 +137,10 @@ while True:
                             
                             print(f"👤 От: {sender_name}")
                             print(f"{file_type}: {file_name}")
+                            if caption:
+                                print(f"📝 Подпись: {caption}")
                             
-                            # 👇 ПРОВЕРЯЕМ ОТВЕТ ДЛЯ МЕДИА
+                            # Проверяем ответ для медиа
                             reply_info = ""
                             if 'quotedMessage' in message_data:
                                 quoted = message_data['quotedMessage']
@@ -145,9 +154,12 @@ while True:
                                         reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
                             
                             # Скачиваем файл
+                            print(f"📥 Скачивание файла...")
                             file_response = requests.get(download_url)
                             
                             if file_response.status_code == 200:
+                                print(f"✅ Файл скачан, размер: {len(file_response.content)} байт")
+                                
                                 if msg_type == 'imageMessage':
                                     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
                                     files = {'photo': (file_name, file_response.content)}
@@ -158,8 +170,7 @@ while True:
                                         'chat_id': TELEGRAM_CHAT_ID,
                                         'caption': full_caption
                                     }
-                                    requests.post(tg_url, data=data, files=files)
-                                    print("✅ Фото отправлено в Telegram!")
+                                    tg_response = requests.post(tg_url, data=data, files=files)
                                 else:
                                     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
                                     files = {'document': (file_name, file_response.content)}
@@ -170,10 +181,14 @@ while True:
                                         'chat_id': TELEGRAM_CHAT_ID,
                                         'caption': full_caption
                                     }
-                                    requests.post(tg_url, data=data, files=files)
+                                    tg_response = requests.post(tg_url, data=data, files=files)
+                                
+                                if tg_response.status_code == 200:
                                     print(f"✅ {file_type} отправлен в Telegram!")
+                                else:
+                                    print(f"❌ Ошибка отправки в Telegram: {tg_response.status_code}")
                             else:
-                                print(f"❌ Не удалось скачать файл")
+                                print(f"❌ Не удалось скачать файл: {file_response.status_code}")
                         else:
                             print("⏭️ Нет ссылки на файл")
                     else:
