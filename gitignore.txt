@@ -1,0 +1,9 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+bot_state.json
+last_message_id.txt
+.DS_Store
