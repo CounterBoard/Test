@@ -53,7 +53,7 @@ def send_history_to_telegram(chat_id, count=10):
         return
     
     messages = []
-    # ✅ ПЕРЕВОРАЧИВАЕМ СПИСОК, чтобы новые сообщения были внизу
+    # Переворачиваем список, чтобы новые сообщения были внизу
     for msg in reversed(history[:count]):
         msg_type = msg.get('type', '')
         sender = msg.get('senderName', 'Неизвестно')
@@ -95,17 +95,26 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
     
     def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
-        
+        """Обрабатываем команды от Telegram"""
         try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            
+            print(f"\n📥 Получен POST запрос от Telegram")
+            print(f"📦 Данные: {post_data.decode('utf-8')}")
+            
             update = json.loads(post_data)
             
             if 'message' in update and 'text' in update['message']:
                 text = update['message']['text']
                 chat_id = update['message']['chat']['id']
                 
+                print(f"📨 Текст команды: {text}")
+                print(f"👥 Чат ID: {chat_id}")
+                print(f"🎯 Ожидаемый чат: {TELEGRAM_CHAT_ID}")
+                
                 if str(chat_id) == str(TELEGRAM_CHAT_ID):
+                    print("✅ Чат совпадает!")
                     if text.startswith('/h'):
                         parts = text.split()
                         count = 10
@@ -114,10 +123,14 @@ class Handler(BaseHTTPRequestHandler):
                         
                         print(f"📨 Получена команда /h с параметром {count}")
                         send_history_to_telegram(chat_id, count)
+                else:
+                    print("❌ Чат не совпадает")
         except Exception as e:
             print(f"❌ Ошибка обработки команды: {e}")
         
+        # ВАЖНО: всегда отвечаем 200 OK
         self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
         self.end_headers()
         self.wfile.write(b"OK")
     
