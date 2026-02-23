@@ -2,7 +2,27 @@ import os
 import requests
 import time
 import json
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
+
+# ===== МИНИМАЛЬНЫЙ ВЕБ-СЕРВЕР ДЛЯ RENDER =====
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Diagnostic mode")
+    def log_message(self, format, *args): pass
+
+def run_http_server():
+    port = int(os.environ.get('PORT', 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    print(f"🌐 Веб-сервер запущен на порту {port}")
+    server.serve_forever()
+
+web_thread = threading.Thread(target=run_http_server, daemon=True)
+web_thread.start()
+# ==============================================
 
 ID_INSTANCE = os.environ.get('ID_INSTANCE')
 API_TOKEN = os.environ.get('API_TOKEN')
