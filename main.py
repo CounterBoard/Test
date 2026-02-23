@@ -15,7 +15,7 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 # ===================================
 
 print("=" * 50)
-print("🔍 ДИАГНОСТИКА СТИКЕРОВ")
+print("🔍 ДИАГНОСТИКА СТИКЕРОВ (ПОЛНАЯ)")
 print("=" * 50)
 print("🟢 Запущено. Отправьте СТИКЕР в нужный чат...\n")
 
@@ -51,15 +51,22 @@ while True:
             
             if receipt_id:
                 print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔔 ПОЛУЧЕНО!")
+                print("=" * 60)
                 
-                # Показываем всю структуру данных
-                print("📦 Данные уведомления:")
+                # Показываем ВСЮ структуру данных без сокращений
+                print("📦 ПОЛНЫЕ ДАННЫЕ:")
                 print(json.dumps(data, indent=2, ensure_ascii=False))
+                print("=" * 60)
+                
+                # Отдельно показываем messageData, если есть
+                if 'body' in data and 'messageData' in data['body']:
+                    print("\n📌 messageData:")
+                    print(json.dumps(data['body']['messageData'], indent=2, ensure_ascii=False))
                 
                 # Удаляем уведомление
                 delete_url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/deleteNotification/{API_TOKEN}/{receipt_id}"
                 requests.delete(delete_url)
-                print("=" * 60 + "\n")
+                print("\n🗑️ Уведомление удалено\n")
         else:
             print(".", end="", flush=True)
             
