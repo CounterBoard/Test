@@ -40,7 +40,7 @@ def get_chat_history(count=10):
         return None
 
 def send_history_to_telegram(chat_id, count=10):
-    """Отправляет историю сообщений в Telegram"""
+    """Отправляет историю сообщений в Telegram (новые сообщения внизу)"""
     history = get_chat_history(count)
     
     if not history or len(history) == 0:
@@ -53,7 +53,8 @@ def send_history_to_telegram(chat_id, count=10):
         return
     
     messages = []
-    for msg in history[:count]:
+    # ✅ ПЕРЕВОРАЧИВАЕМ СПИСОК, чтобы новые сообщения были внизу
+    for msg in reversed(history[:count]):
         msg_type = msg.get('type', '')
         sender = msg.get('senderName', 'Неизвестно')
         text = msg.get('textMessage', '')
@@ -132,7 +133,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С КОМАНДОЙ /h)")
+print("🚀 МОСТ MAX → TELEGRAM (С ИСТОРИЕЙ /h)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
