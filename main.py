@@ -15,9 +15,9 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 # ===================================
 
 print("=" * 50)
-print("🔍 ДИАГНОСТИКА СТИКЕРОВ (ПОЛНАЯ)")
+print("🔍 ПОИСК СТИКЕРОВ")
 print("=" * 50)
-print("🟢 Запущено. Отправьте СТИКЕР в нужный чат...\n")
+print("🟢 Запущено. Отправьте СТИКЕР в чат...\n")
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -50,23 +50,24 @@ while True:
             receipt_id = data.get('receiptId')
             
             if receipt_id:
-                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔔 ПОЛУЧЕНО!")
-                print("=" * 60)
-                
-                # Показываем ВСЮ структуру данных без сокращений
-                print("📦 ПОЛНЫЕ ДАННЫЕ:")
-                print(json.dumps(data, indent=2, ensure_ascii=False))
-                print("=" * 60)
-                
-                # Отдельно показываем messageData, если есть
+                # Получаем тип сообщения
+                msg_type = "unknown"
                 if 'body' in data and 'messageData' in data['body']:
-                    print("\n📌 messageData:")
-                    print(json.dumps(data['body']['messageData'], indent=2, ensure_ascii=False))
+                    msg_type = data['body']['messageData'].get('typeMessage', 'unknown')
+                
+                # Показываем только если это не текст
+                if msg_type != 'textMessage':
+                    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔔 НАЙДЕНО НЕ-ТЕКСТОВОЕ СООБЩЕНИЕ!")
+                    print(f"📌 Тип: {msg_type}")
+                    print("📦 Данные:")
+                    print(json.dumps(data, indent=2, ensure_ascii=False))
+                    print("=" * 60)
+                else:
+                    print("📝", end="", flush=True)  # Пропускаем текстовые
                 
                 # Удаляем уведомление
                 delete_url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/deleteNotification/{API_TOKEN}/{receipt_id}"
                 requests.delete(delete_url)
-                print("\n🗑️ Уведомление удалено\n")
         else:
             print(".", end="", flush=True)
             
