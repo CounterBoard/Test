@@ -67,8 +67,8 @@ def get_chat_history(count=5):
 
 def send_text_to_telegram(text, sender_name):
     """Отправляет текстовое сообщение в Telegram в нужном формате"""
-    # Жирный только заголовок, само сообщение обычным текстом
-    full_message = f"📨 **MAX от {sender_name}:**\n\n{text}"
+    # Заголовок, затем пробел на новой строке, затем текст
+    full_message = f"📨 **MAX от {sender_name}:**\n \n{text}"
     
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     tg_data = {
@@ -96,7 +96,7 @@ print(f"📬 Чат Telegram: {TELEGRAM_CHAT_ID}")
 print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("⏱️ Максимальная задержка: 1 секунда")
-print("📊 Статистика будет каждые 50 сообщений\n")
+print("📊 Статистика будет каждые 10 сообщений\n")
 
 while True:
     try:
@@ -112,8 +112,13 @@ while True:
                 if not msg_id or msg_id in processed_messages:
                     continue
                 
-                # Имя отправителя (всегда полное имя и фамилия)
-                sender_name = msg.get('senderName', 'Неизвестно')
+                # Определяем отправителя
+                if msg.get('type') == 'incoming':
+                    # Входящие сообщения от других людей
+                    sender_name = msg.get('senderName', 'Неизвестно')
+                else:
+                    # Твои сообщения
+                    sender_name = "ымел осла"
                 
                 # Текстовые сообщения
                 if msg.get('typeMessage') == 'textMessage':
@@ -141,8 +146,8 @@ while True:
                 if len(processed_messages) > 1000:
                     processed_messages = set(list(processed_messages)[-500:])
                 
-                # Статистика каждые 50 сообщений
-                if stats['total'] > 0 and stats['total'] % 50 == 0:
+                # Статистика каждые 10 сообщений
+                if stats['total'] > 0 and stats['total'] % 10 == 0:
                     print("\n" + "="*50)
                     print("📊 СТАТИСТИКА:")
                     print(f"📥 Всего новых: {stats['total']}")
