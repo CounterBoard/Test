@@ -65,16 +65,16 @@ def get_chat_history(count=5):
         print(f"❌ Ошибка при запросе истории: {e}")
         return None
 
-def send_text_to_telegram(text, sender_name, timestamp):
+def send_text_to_telegram(text, sender_name):
     """Отправляет текстовое сообщение в Telegram в нужном формате"""
-    # Убираем время, оставляем только имя и сообщение с отступом
+    # Жирный только заголовок, само сообщение обычным текстом
     full_message = f"📨 **MAX от {sender_name}:**\n\n{text}"
     
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     tg_data = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": full_message,
-        "parse_mode": "Markdown"  # Используем Markdown для жирного текста
+        "parse_mode": "Markdown"
     }
     try:
         response = requests.post(tg_url, json=tg_data, timeout=10)
@@ -112,12 +112,8 @@ while True:
                 if not msg_id or msg_id in processed_messages:
                     continue
                 
-                # Определяем отправителя (имя и фамилия берутся из senderName)
+                # Имя отправителя (всегда полное имя и фамилия)
                 sender_name = msg.get('senderName', 'Неизвестно')
-                
-                # Если сообщение отправлено тобой, добавляем пометку
-                if msg.get('type') != 'incoming':
-                    sender_name = f"{sender_name} (я)"
                 
                 # Текстовые сообщения
                 if msg.get('typeMessage') == 'textMessage':
@@ -129,7 +125,7 @@ while True:
                         print(f"👤 От: {sender_name}")
                         print(f"📝 Текст: {text[:50]}{'...' if len(text) > 50 else ''}")
                         
-                        if send_text_to_telegram(text, sender_name, timestamp):
+                        if send_text_to_telegram(text, sender_name):
                             stats['sent'] += 1
                             processed_messages.add(msg_id)
                         else:
