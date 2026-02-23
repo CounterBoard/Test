@@ -15,9 +15,9 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 # ===================================
 
 print("=" * 50)
-print("🔍 ПОИСК СТИКЕРОВ")
+print("🔍 УНИВЕРСАЛЬНАЯ ДИАГНОСТИКА")
 print("=" * 50)
-print("🟢 Запущено. Отправьте СТИКЕР в чат...\n")
+print("🟢 Запущено. Отправьте ЛЮБОЕ сообщение (текст, стикер, фото)...\n")
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -50,20 +50,27 @@ while True:
             receipt_id = data.get('receiptId')
             
             if receipt_id:
-                # Получаем тип сообщения
-                msg_type = "unknown"
-                if 'body' in data and 'messageData' in data['body']:
-                    msg_type = data['body']['messageData'].get('typeMessage', 'unknown')
+                # Получаем основные данные
+                body = data.get('body', {})
+                webhook_type = body.get('typeWebhook', 'unknown')
+                sender_data = body.get('senderData', {})
+                message_data = body.get('messageData', {})
+                msg_type = message_data.get('typeMessage', 'unknown')
+                chat_id = sender_data.get('chatId')
                 
-                # Показываем только если это не текст
-                if msg_type != 'textMessage':
-                    print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔔 НАЙДЕНО НЕ-ТЕКСТОВОЕ СООБЩЕНИЕ!")
-                    print(f"📌 Тип: {msg_type}")
-                    print("📦 Данные:")
-                    print(json.dumps(data, indent=2, ensure_ascii=False))
-                    print("=" * 60)
-                else:
-                    print("📝", end="", flush=True)  # Пропускаем текстовые
+                print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 🔔 ПОЛУЧЕНО!")
+                print(f"📌 Тип вебхука: {webhook_type}")
+                print(f"📨 Чат ID: {chat_id}")
+                print(f"📝 Тип сообщения: {msg_type}")
+                print(f"👤 Отправитель: {sender_data.get('senderName', 'неизвестно')}")
+                
+                # Если есть данные файла, покажем их
+                if 'fileMessageData' in message_data:
+                    file_data = message_data['fileMessageData']
+                    print(f"📎 Файл: {file_data.get('fileName', 'без имени')}")
+                    print(f"🔗 Ссылка: {file_data.get('downloadUrl', 'нет')}")
+                
+                print("=" * 60)
                 
                 # Удаляем уведомление
                 delete_url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/deleteNotification/{API_TOKEN}/{receipt_id}"
