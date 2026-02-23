@@ -20,6 +20,46 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
                if not os.environ.get(v)]
     raise ValueError(f"❌ Отсутствуют: {', '.join(missing)}")
 
+# ===== СИСТЕМА ЛОГИРОВАНИЯ =====
+stats = {
+    'received': 0,
+    'sent_text': 0,
+    'sent_media': 0,
+    'skipped': 0,
+    'errors': 0,
+    'types': {}
+}
+
+def log_message_stats(msg_type, status, details=""):
+    """Логирует статистику по сообщениям"""
+    stats['received'] += 1
+    stats['types'][msg_type] = stats['types'].get(msg_type, 0) + 1
+    
+    if status == 'sent':
+        if msg_type == 'textMessage':
+            stats['sent_text'] += 1
+        else:
+            stats['sent_media'] += 1
+    elif status == 'skipped':
+        stats['skipped'] += 1
+    elif status == 'error':
+        stats['errors'] += 1
+    
+    # Каждые 50 сообщений выводим статистику
+    if stats['received'] % 50 == 0:
+        print("\n" + "="*50)
+        print("📊 СТАТИСТИКА:")
+        print(f"📥 Всего получено: {stats['received']}")
+        print(f"📝 Текстов отправлено: {stats['sent_text']}")
+        print(f"🖼️ Медиа отправлено: {stats['sent_media']}")
+        print(f"⏭️ Пропущено: {stats['skipped']}")
+        print(f"❌ Ошибок: {stats['errors']}")
+        print("📌 Типы сообщений:")
+        for t, count in stats['types'].items():
+            print(f"   {t}: {count}")
+        print("="*50 + "\n")
+# ===============================
+
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
 def get_chat_history(count=10):
     """Получает последние count сообщений из чата Max"""
@@ -53,7 +93,6 @@ def send_history_to_telegram(chat_id, count=10):
         return
     
     messages = []
-    # ✅ ПЕРЕВОРАЧИВАЕМ СПИСОК, чтобы новые сообщения были внизу
     for msg in reversed(history[:count]):
         msg_type = msg.get('type', '')
         sender = msg.get('senderName', 'Неизвестно')
@@ -133,7 +172,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ИСТОРИЕЙ /h)")
+print("🚀 МОСТ MAX → TELEGRAM (С ЛОГИРОВАНИЕМ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -160,7 +199,11 @@ while True:
                 message_data = body.get('messageData', {})
                 
                 chat_id = sender_data.get('chatId')
-                print(f"📨 Чат: {chat_id}")
+                msg_type = message_data.get('typeMessage', 'unknown')
+                print(f"📨 Чат: {chat_id}, Тип: {msg_type}")
+                
+                # Логируем получение
+                log_message_stats(msg_type, 'received')
                 
                 if chat_id == MAX_CHAT_ID:
                     print("✅ Сообщение из нужного чата!")
@@ -177,24 +220,35 @@ while True:
                                 reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
                     
                     sender_name = sender_data.get('senderName', 'Неизвестно')
-                    msg_type = message_data.get('typeMessage', '')
                     
+                    # 📝 ТЕКСТОВЫЕ СООБЩЕНИЯ
                     if msg_type == 'textMessage' and 'textMessageData' in message_data:
                         text = message_data['textMessageData'].get('textMessage')
                         if text:
                             print(f"👤 От: {sender_name}")
-                            print(f"📝 Текст: {text}")
+                            print(f"📝 Текст: {text[:50]}...")
                             
                             full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
                             
-                            tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-                            tg_data = {
-                                "chat_id": TELEGRAM_CHAT_ID,
-                                "text": full_message
-                            }
-                            requests.post(tg_url, json=tg_data)
-                            print("✅ Текст отправлен в Telegram!")
+                            try:
+                                tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                                tg_data = {
+                                    "chat_id": TELEGRAM_CHAT_ID,
+                                    "text": full_message
+                                }
+                                tg_response = requests.post(tg_url, json=tg_data, timeout=10)
+                                
+                                if tg_response.status_code == 200:
+                                    print("✅ Текст отправлен в Telegram!")
+                                    log_message_stats(msg_type, 'sent')
+                                else:
+                                    print(f"❌ Ошибка Telegram: {tg_response.status_code}")
+                                    log_message_stats(msg_type, 'error', f"HTTP {tg_response.status_code}")
+                            except Exception as e:
+                                print(f"❌ Ошибка отправки: {e}")
+                                log_message_stats(msg_type, 'error', str(e))
                     
+                    # 🖼️ МЕДИА СООБЩЕНИЯ
                     elif msg_type in ['imageMessage', 'videoMessage', 'documentMessage', 'audioMessage']:
                         file_data = message_data.get('fileMessageData', {})
                         download_url = file_data.get('downloadUrl')
@@ -212,40 +266,69 @@ while True:
                             print(f"👤 От: {sender_name}")
                             print(f"{file_type}: {file_name}")
                             
-                            file_response = requests.get(download_url)
-                            
-                            if file_response.status_code == 200:
-                                full_caption = f"{reply_info}📨 MAX от {sender_name}"
-                                if caption:
-                                    full_caption += f"\n{caption}"
+                            try:
+                                # Скачиваем файл
+                                file_response = requests.get(download_url, timeout=30)
                                 
-                                if msg_type == 'imageMessage':
-                                    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-                                    files = {'photo': (file_name, file_response.content)}
-                                    data = {
-                                        'chat_id': TELEGRAM_CHAT_ID,
-                                        'caption': full_caption
-                                    }
-                                    requests.post(tg_url, data=data, files=files)
-                                    print("✅ Фото отправлено в Telegram!")
+                                if file_response.status_code == 200:
+                                    file_size = len(file_response.content)
+                                    print(f"📦 Размер файла: {file_size/1024:.1f} KB")
+                                    
+                                    # Проверка лимитов Telegram
+                                    if file_size > 50 * 1024 * 1024:  # 50 MB
+                                        print(f"⚠️ Файл слишком большой ({file_size/1024/1024:.1f} MB), пропускаем")
+                                        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                                        data = {
+                                            "chat_id": TELEGRAM_CHAT_ID,
+                                            "text": f"⚠️ {sender_name} отправил {file_type}, но файл слишком большой для Telegram ({file_size/1024/1024:.1f} MB)"
+                                        }
+                                        requests.post(tg_url, json=data, timeout=10)
+                                        log_message_stats(msg_type, 'skipped', 'file too large')
+                                    else:
+                                        full_caption = f"{reply_info}📨 MAX от {sender_name}"
+                                        if caption:
+                                            full_caption += f"\n{caption}"
+                                        
+                                        if msg_type == 'imageMessage':
+                                            tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
+                                            files = {'photo': (file_name, file_response.content)}
+                                            data = {
+                                                'chat_id': TELEGRAM_CHAT_ID,
+                                                'caption': full_caption
+                                            }
+                                            tg_response = requests.post(tg_url, data=data, files=files, timeout=30)
+                                        else:
+                                            tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+                                            files = {'document': (file_name, file_response.content)}
+                                            data = {
+                                                'chat_id': TELEGRAM_CHAT_ID,
+                                                'caption': full_caption
+                                            }
+                                            tg_response = requests.post(tg_url, data=data, files=files, timeout=30)
+                                        
+                                        if tg_response.status_code == 200:
+                                            print(f"✅ {file_type} отправлен в Telegram!")
+                                            log_message_stats(msg_type, 'sent')
+                                        else:
+                                            print(f"❌ Ошибка Telegram: {tg_response.status_code}")
+                                            log_message_stats(msg_type, 'error', f"HTTP {tg_response.status_code}")
                                 else:
-                                    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
-                                    files = {'document': (file_name, file_response.content)}
-                                    data = {
-                                        'chat_id': TELEGRAM_CHAT_ID,
-                                        'caption': full_caption
-                                    }
-                                    requests.post(tg_url, data=data, files=files)
-                                    print(f"✅ {file_type} отправлен в Telegram!")
-                            else:
-                                print(f"❌ Не удалось скачать файл")
+                                    print(f"❌ Не удалось скачать файл: {file_response.status_code}")
+                                    log_message_stats(msg_type, 'error', f'download failed {file_response.status_code}')
+                            except Exception as e:
+                                print(f"❌ Ошибка обработки медиа: {e}")
+                                log_message_stats(msg_type, 'error', str(e))
                         else:
                             print("⏭️ Нет ссылки на файл")
+                            log_message_stats(msg_type, 'skipped', 'no download URL')
                     else:
                         print(f"⏭️ Неподдерживаемый тип: {msg_type}")
+                        log_message_stats(msg_type, 'skipped', 'unsupported type')
                 else:
                     print(f"⏭️ Не тот чат (жду {MAX_CHAT_ID})")
+                    log_message_stats(msg_type, 'skipped', 'wrong chat')
                 
+                # Удаляем уведомление
                 delete_url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/deleteNotification/{API_TOKEN}/{receipt_id}"
                 requests.delete(delete_url)
                 print("🗑️ Уведомление удалено")
@@ -255,7 +338,7 @@ while True:
     except requests.exceptions.Timeout:
         print("t", end="", flush=True)
     except Exception as e:
-        print(f"\n❌ Ошибка: {e}")
+        print(f"\n❌ Ошибка в основном цикле: {e}")
         time.sleep(5)
     
     time.sleep(1)
