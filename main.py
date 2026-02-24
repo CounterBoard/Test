@@ -44,10 +44,27 @@ def get_chat_history(count=10):
         return None
 
 def send_history_to_telegram(chat_id, count=10):
-    """Отправляет историю сообщений в Telegram"""
+    """Отправляет историю сообщений в Telegram (с диагностикой)"""
+    print(f"\n🔍 ВЫЗВАНА КОМАНДА /h с параметром {count}")
+    print(f"📤 Отправляю запрос к GREEN-API...")
+    
     history = get_chat_history(count)
     
+    print(f"📥 Получен ответ от GREEN-API:")
+    if history is None:
+        print("❌ history = None")
+    else:
+        print(f"📦 Тип history: {type(history)}")
+        print(f"📏 Длина history: {len(history)}")
+        
+        if len(history) > 0:
+            print(f"✅ Найдено {len(history)} сообщений")
+            print(f"📌 Первое сообщение: {json.dumps(history[0], indent=2, ensure_ascii=False)}")
+        else:
+            print("⚠️ history - пустой список")
+    
     if not history or len(history) == 0:
+        print("⏭️ Отправляю сообщение об отсутствии истории")
         tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         data = {
             "chat_id": chat_id,
@@ -57,20 +74,17 @@ def send_history_to_telegram(chat_id, count=10):
         return
     
     messages = []
-    for msg in reversed(history[:count]):  # новые внизу
-        msg_type = msg.get('type', '')  # 'incoming' или 'outgoing'
+    for msg in reversed(history[:count]):
+        msg_type = msg.get('type', '')
         text = msg.get('textMessage', '')
         timestamp = msg.get('timestamp', 0)
         
         time_str = datetime.fromtimestamp(timestamp).strftime('%H:%M %d.%m')
         
-        # Определяем отправителя по типу сообщения
         if msg_type == 'incoming':
-            # Входящие сообщения от других людей
             sender = msg.get('senderName', 'Неизвестно')
             arrow = '📥'
         else:
-            # Твои исходящие сообщения
             sender = "ымел осла"
             arrow = '📤'
         
@@ -84,14 +98,21 @@ def send_history_to_telegram(chat_id, count=10):
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "...\n\n(сообщение обрезано)"
     
+    print(f"📤 Отправляю историю в Telegram, длина текста: {len(full_text)} символов")
+    
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": chat_id,
         "text": full_text,
         "parse_mode": "Markdown"
     }
-    requests.post(tg_url, json=data)
-    print(f"📜 История из {count} сообщений отправлена в Telegram")
+    response = requests.post(tg_url, json=data)
+    
+    if response.status_code == 200:
+        print("✅ История успешно отправлена в Telegram")
+    else:
+        print(f"❌ Ошибка отправки в Telegram: {response.status_code}")
+        print(response.text)
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -165,7 +186,7 @@ def send_text_to_telegram(text, sender_name):
         return False
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ИСПРАВЛЕННОЙ ИСТОРИЕЙ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ДИАГНОСТИКОЙ /h)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -174,8 +195,6 @@ print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("📝 Команда /h - последние 10 сообщений, /h 5 - последние 5")
 print("📊 Статистика каждые 10 сообщений\n")
-
-receive_url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/receiveNotification/{API_TOKEN}"
 
 while True:
     try:
