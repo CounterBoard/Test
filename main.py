@@ -74,7 +74,7 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
-        # Проверяем, есть ли ответ (цитирование)
+        # 👇 ИСПРАВЛЕНО: отображаем имя отвечаемого
         reply_prefix = ""
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
@@ -86,7 +86,7 @@ def send_history_to_telegram(chat_id, count=10):
                 else:
                     reply_prefix = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
         
-        # Добавляем пометку о редактировании, если есть [citation:7]
+        # Добавляем пометку о редактировании
         edit_mark = " ✏️" if msg.get('isEdited') else ""
         
         if len(text) > 100:
@@ -106,9 +106,11 @@ def send_history_to_telegram(chat_id, count=10):
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
                  json={"chat_id": chat_id, "text": full_text})
 
-def send_text_to_telegram(text, sender_name, reply_info=""):
-    """Отправляет текстовое сообщение в Telegram с поддержкой ответов"""
-    if reply_info:
+def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False):
+    """Отправляет текстовое сообщение в Telegram с поддержкой ответов и редактирования"""
+    if is_edit:
+        full_message = f"✏️ **MAX от {sender_name} отредактировал сообщение:**\n{text}"
+    elif reply_info:
         full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
     else:
         full_message = f"📨 MAX от {sender_name}:\n{text}"
@@ -120,28 +122,11 @@ def send_text_to_telegram(text, sender_name, reply_info=""):
     except:
         return False
 
-# ===== НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ РЕДАКТИРОВАНИЯ =====
+# ===== ОБРАБОТКА РЕДАКТИРОВАНИЯ =====
 def handle_edited_message(stanza_id, new_text, sender_name):
-    """Отправляет уведомление о редактировании сообщения в Telegram [citation:7]"""
-    full_message = f"✏️ **MAX от {sender_name} отредактировал сообщение:**\n{new_text}"
-    
-    try:
-        response = requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": full_message,
-                "parse_mode": "Markdown"
-            },
-            timeout=10
-        )
-        if response.status_code == 200:
-            print(f"✅ Уведомление о редактировании отправлено")
-        else:
-            print(f"❌ Ошибка Telegram: {response.status_code}")
-    except Exception as e:
-        print(f"❌ Ошибка при отправке уведомления о редактировании: {e}")
-# =====================================================
+    """Отправляет уведомление о редактировании сообщения в Telegram"""
+    send_text_to_telegram(new_text, sender_name, is_edit=True)
+    print(f"✅ Уведомление о редактировании отправлено")
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -161,8 +146,6 @@ class Handler(BaseHTTPRequestHandler):
         if content_length > 0:
             try:
                 update = json.loads(post_data)
-                
-                # Получаем тип вебхука [citation:7]
                 webhook_type = update.get('typeWebhook')
                 
                 # Обработка команд /h
@@ -176,19 +159,16 @@ class Handler(BaseHTTPRequestHandler):
                             count = int(parts[1])
                         send_history_to_telegram(chat_id, count)
                 
-                # 👇 НОВОЕ: обработка редактирования сообщений [citation:7]
+                # Обработка редактирования сообщений
                 elif webhook_type == 'editedMessageWebhook':
-                    print(f"\n✏️ [{datetime.now().strftime('%H:%M:%S')}] ПОЛУЧЕНО УВЕДОМЛЕНИЕ О РЕДАКТИРОВАНИИ!")
+                    print(f"\n✏️ ПОЛУЧЕНО УВЕДОМЛЕНИЕ О РЕДАКТИРОВАНИИ!")
                     
-                    # Извлекаем данные
                     body = update.get('body', {})
                     message_data = body.get('messageData', {})
                     sender_data = body.get('senderData', {})
                     
-                    # В editedMessageWebhook данные лежат в editedMessageData [citation:7]
                     edited_data = message_data.get('editedMessageData', {})
                     
-                    # stanzaId - ID оригинального сообщения, которое было отредактировано [citation:7]
                     stanza_id = edited_data.get('stanzaId')
                     new_text = edited_data.get('textMessage', '')
                     sender_name = sender_data.get('senderName', 'Неизвестно')
@@ -198,7 +178,9 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"📝 Новый текст: {new_text[:50]}...")
                     
                     if stanza_id and new_text:
-                        # Отправляем уведомление в Telegram
+                        # Удаляем оригинальный ID из обработанных, чтобы сообщение отправилось заново
+                        if stanza_id in processed_ids:
+                            processed_ids.remove(stanza_id)
                         handle_edited_message(stanza_id, new_text, sender_name)
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
@@ -242,24 +224,33 @@ while True:
             for msg in reversed(history):
                 msg_id = msg.get('idMessage')
                 
-                if not msg_id or msg_id in processed_ids:
+                # 👇 ИСПРАВЛЕНО: для отредактированных сообщений пропускаем проверку processed_ids
+                is_edited = msg.get('isEdited', False)
+                
+                if not msg_id:
+                    continue
+                
+                if msg_id in processed_ids and not is_edited:
                     continue
                 
                 if msg.get('typeMessage') != 'textMessage':
-                    processed_ids.add(msg_id)
+                    if not is_edited:
+                        processed_ids.add(msg_id)
                     continue
                 
                 timestamp = msg.get('timestamp', 0)
-                if time.time() - timestamp > 30:
-                    processed_ids.add(msg_id)
+                if time.time() - timestamp > 30 and not is_edited:
+                    if not is_edited:
+                        processed_ids.add(msg_id)
                     continue
                 
                 text = msg.get('textMessage', '')
                 if not text:
-                    processed_ids.add(msg_id)
+                    if not is_edited:
+                        processed_ids.add(msg_id)
                     continue
                 
-                # Получаем информацию об ответе (цитирование)
+                # Получаем информацию об ответе
                 reply_info = ""
                 if 'quotedMessage' in msg:
                     quoted = msg['quotedMessage']
@@ -278,7 +269,7 @@ while True:
                     sender_name = "@scul_k"
                 
                 stats['total'] += 1
-                if send_text_to_telegram(text, sender_name, reply_info):
+                if send_text_to_telegram(text, sender_name, reply_info, is_edit=is_edited):
                     stats['sent'] += 1
                     processed_ids.add(msg_id)
                 else:
