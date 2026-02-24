@@ -21,7 +21,8 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
     raise ValueError(f"❌ Отсутствуют: {', '.join(missing)}")
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
-processed_ids = set()
+processed_ids = set()  # обычные сообщения
+edited_ids = set()     # отдельное хранилище для редактированных
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -74,7 +75,7 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
-        # 👇 ИСПРАВЛЕНО: отображаем имя отвечаемого
+        # Отображаем имя отвечаемого
         reply_prefix = ""
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
@@ -86,7 +87,7 @@ def send_history_to_telegram(chat_id, count=10):
                 else:
                     reply_prefix = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
         
-        # Добавляем пометку о редактировании
+        # Пометка о редактировании
         edit_mark = " ✏️" if msg.get('isEdited') else ""
         
         if len(text) > 100:
@@ -107,7 +108,7 @@ def send_history_to_telegram(chat_id, count=10):
                  json={"chat_id": chat_id, "text": full_text})
 
 def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False):
-    """Отправляет текстовое сообщение в Telegram с поддержкой ответов и редактирования"""
+    """Отправляет текстовое сообщение в Telegram"""
     if is_edit:
         full_message = f"✏️ **MAX от {sender_name} отредактировал сообщение:**\n{text}"
     elif reply_info:
@@ -125,7 +126,14 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False):
 # ===== ОБРАБОТКА РЕДАКТИРОВАНИЯ =====
 def handle_edited_message(stanza_id, new_text, sender_name):
     """Отправляет уведомление о редактировании сообщения в Telegram"""
+    # Проверяем, не отправляли ли уже это редактирование
+    edit_key = f"edit_{stanza_id}"
+    if edit_key in edited_ids:
+        print(f"⏭️ Редактирование уже обработано, пропускаем")
+        return
+    
     send_text_to_telegram(new_text, sender_name, is_edit=True)
+    edited_ids.add(edit_key)
     print(f"✅ Уведомление о редактировании отправлено")
 
 # ===== ВЕБ-СЕРВЕР =====
@@ -178,9 +186,6 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"📝 Новый текст: {new_text[:50]}...")
                     
                     if stanza_id and new_text:
-                        # Удаляем оригинальный ID из обработанных, чтобы сообщение отправилось заново
-                        if stanza_id in processed_ids:
-                            processed_ids.remove(stanza_id)
                         handle_edited_message(stanza_id, new_text, sender_name)
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
@@ -202,7 +207,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С РЕДАКТИРОВАНИЕМ)")
+print("🚀 МОСТ MAX → TELEGRAM (БЕЗ ДУБЛЕЙ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -215,21 +220,22 @@ print("✏️ Редактирование поддерживается")
 print("💬 Цитирование поддерживается\n")
 
 last_cleanup = time.time()
+last_message_time = 0
 
 while True:
     try:
         history = get_chat_history(15)
         
         if history and isinstance(history, list):
+            # Проходим с конца (новые сообщения)
             for msg in reversed(history):
                 msg_id = msg.get('idMessage')
-                
-                # 👇 ИСПРАВЛЕНО: для отредактированных сообщений пропускаем проверку processed_ids
                 is_edited = msg.get('isEdited', False)
                 
                 if not msg_id:
                     continue
                 
+                # Пропускаем если уже обработано (с учётом редактирования)
                 if msg_id in processed_ids and not is_edited:
                     continue
                 
@@ -238,11 +244,16 @@ while True:
                         processed_ids.add(msg_id)
                     continue
                 
+                # Проверяем возраст только для новых сообщений
                 timestamp = msg.get('timestamp', 0)
                 if time.time() - timestamp > 30 and not is_edited:
                     if not is_edited:
                         processed_ids.add(msg_id)
                     continue
+                
+                # Защита от слишком частых отправок
+                if time.time() - last_message_time < 0.5:
+                    time.sleep(0.5)
                 
                 text = msg.get('textMessage', '')
                 if not text:
@@ -261,7 +272,6 @@ while True:
                             reply_info = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
                         else:
                             reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
-                        print(f"📎 Найден ответ на: {quoted_text[:30]}...")
                 
                 if msg.get('type') == 'incoming':
                     sender_name = msg.get('senderName', 'Неизвестно')
@@ -272,16 +282,19 @@ while True:
                 if send_text_to_telegram(text, sender_name, reply_info, is_edit=is_edited):
                     stats['sent'] += 1
                     processed_ids.add(msg_id)
+                    last_message_time = time.time()
                 else:
                     stats['skipped'] += 1
                 
                 if stats['total'] % 10 == 0:
                     print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
         
-        # Очистка старых ID раз в минуту
+        # Очистка старых данных
         if time.time() - last_cleanup > 60:
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
+            if len(edited_ids) > 100:
+                edited_ids = set(list(edited_ids)[-100:])
             last_cleanup = time.time()
         
         time.sleep(1)
