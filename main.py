@@ -22,39 +22,67 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
 processed_messages = set()
-last_processed_time = 0
+last_message_time = 0
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
 def get_chat_history(count=10):
     """Получает последние count сообщений из чата Max"""
     url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/GetChatHistory/{API_TOKEN}"
+    
+    # Согласно документации GREEN-API, нужны оба параметра
     payload = {
         "chatId": MAX_CHAT_ID,
         "count": min(count, 100)
     }
+    
+    print(f"\n🔍 Запрос истории к GREEN-API:")
+    print(f"📤 URL: {url}")
+    print(f"📦 Payload: {payload}")
+    
     try:
         response = requests.post(url, json=payload, timeout=10)
+        print(f"📊 Статус ответа: {response.status_code}")
+        
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            print(f"✅ Получено сообщений: {len(data)}")
+            if len(data) > 0:
+                print(f"📌 Первое сообщение: {json.dumps(data[0], indent=2, ensure_ascii=False)}")
+            return data
         else:
-            print(f"❌ Ошибка получения истории: {response.status_code}")
+            print(f"❌ Ошибка: {response.status_code}")
+            print(f"📝 Текст ошибки: {response.text}")
             return []
     except Exception as e:
-        print(f"❌ Ошибка при запросе истории: {e}")
+        print(f"❌ Исключение: {e}")
         return []
 
 def send_history_to_telegram(chat_id, count=10):
     """Отправляет историю сообщений в Telegram"""
     print(f"\n🔍 ВЫЗВАНА КОМАНДА /h с параметром {count}")
+    print(f"👥 Чат ID для отправки: {chat_id}")
     
     history = get_chat_history(count)
     
-    if not history or len(history) == 0:
+    print(f"📦 Получена история: тип={type(history)}, длина={len(history) if history else 0}")
+    
+    if not history:
+        print("❌ history = None или пустой список")
         tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         data = {
             "chat_id": chat_id,
-            "text": "📭 Нет сообщений в истории"
+            "text": "❌ Ошибка получения истории от GREEN-API (пустой ответ)"
+        }
+        requests.post(tg_url, json=data)
+        return
+    
+    if len(history) == 0:
+        print("⏭️ История пуста (нет сообщений)")
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": chat_id,
+            "text": "📭 Нет сообщений в истории за последние 14 дней"
         }
         requests.post(tg_url, json=data)
         return
@@ -84,13 +112,24 @@ def send_history_to_telegram(chat_id, count=10):
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "...\n\n(сообщение обрезано)"
     
+    print(f"📤 Отправка истории в Telegram, длина текста: {len(full_text)} символов")
+    print(f"📝 Текст истории: {full_text[:200]}...")
+    
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": chat_id,
         "text": full_text
     }
-    requests.post(tg_url, json=data)
-    print(f"✅ История из {count} сообщений отправлена")
+    
+    try:
+        response = requests.post(tg_url, json=data, timeout=10)
+        print(f"📊 Ответ Telegram: {response.status_code}")
+        if response.status_code == 200:
+            print("✅ История успешно отправлена")
+        else:
+            print(f"❌ Ошибка Telegram: {response.text}")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке: {e}")
 
 def send_text_to_telegram(text, sender_name):
     """Отправляет текстовое сообщение в Telegram"""
@@ -166,7 +205,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (БЕЗ ДУБЛЕЙ)")
+print("🚀 МОСТ MAX → TELEGRAM (ДИАГНОСТИКА ИСТОРИИ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -177,12 +216,9 @@ print("📝 Команда /h - последние 10 сообщений")
 print("📊 Статистика каждые 10 сообщений")
 print("👤 Твои сообщения: @scul_k\n")
 
-# Получаем текущее время для фильтрации старых сообщений
-start_time = time.time()
-
 while True:
     try:
-        history = get_chat_history(10)
+        history = get_chat_history(5)
         
         if history and isinstance(history, list):
             # Идём с конца (новые сообщения)
@@ -190,12 +226,13 @@ while True:
                 msg_id = msg.get('idMessage')
                 timestamp = msg.get('timestamp', 0)
                 
-                # Пропускаем старые сообщения (до запуска скрипта)
-                if timestamp < start_time - 5:
-                    continue
-                
                 # Пропускаем если уже обработано
                 if not msg_id or msg_id in processed_messages:
+                    continue
+                
+                # Проверяем, не слишком ли старое сообщение (старше 10 секунд)
+                if time.time() - timestamp > 10:
+                    processed_messages.add(msg_id)
                     continue
                 
                 if msg.get('type') == 'incoming':
@@ -222,21 +259,20 @@ while True:
                     print(f"\n📥 МЕДИА от {sender_name} (пока не обрабатывается)")
                     processed_messages.add(msg_id)
                     stats['skipped'] += 1
-            
-            # Ограничиваем размер хранилища
-            if len(processed_messages) > 1000:
-                # Оставляем только последние 500
-                processed_messages = set(list(processed_messages)[-500:])
-            
-            if stats['total'] > 0 and stats['total'] % 10 == 0:
-                print("\n" + "="*50)
-                print("📊 СТАТИСТИКА:")
-                print(f"📥 Всего новых: {stats['total']}")
-                print(f"✅ Отправлено: {stats['sent']}")
-                print(f"⏭️ Пропущено: {stats['skipped']}")
-                print("="*50)
+                
+                # Ограничиваем размер хранилища
+                if len(processed_messages) > 1000:
+                    processed_messages = set(list(processed_messages)[-500:])
+                
+                if stats['total'] > 0 and stats['total'] % 10 == 0:
+                    print("\n" + "="*50)
+                    print("📊 СТАТИСТИКА:")
+                    print(f"📥 Всего новых: {stats['total']}")
+                    print(f"✅ Отправлено: {stats['sent']}")
+                    print(f"⏭️ Пропущено: {stats['skipped']}")
+                    print("="*50)
         
-        time.sleep(2)  # Увеличил до 2 секунд для надёжности
+        time.sleep(1)
         
     except KeyboardInterrupt:
         print("\n\n👋 Скрипт остановлен")
