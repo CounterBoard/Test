@@ -44,27 +44,13 @@ def get_chat_history(count=10):
         return None
 
 def send_history_to_telegram(chat_id, count=10):
-    """Отправляет историю сообщений в Telegram (с диагностикой)"""
+    """Отправляет историю сообщений в Telegram"""
     print(f"\n🔍 ВЫЗВАНА КОМАНДА /h с параметром {count}")
-    print(f"📤 Отправляю запрос к GREEN-API...")
     
     history = get_chat_history(count)
     
-    print(f"📥 Получен ответ от GREEN-API:")
-    if history is None:
-        print("❌ history = None")
-    else:
-        print(f"📦 Тип history: {type(history)}")
-        print(f"📏 Длина history: {len(history)}")
-        
-        if len(history) > 0:
-            print(f"✅ Найдено {len(history)} сообщений")
-            print(f"📌 Первое сообщение: {json.dumps(history[0], indent=2, ensure_ascii=False)}")
-        else:
-            print("⚠️ history - пустой список")
-    
     if not history or len(history) == 0:
-        print("⏭️ Отправляю сообщение об отсутствии истории")
+        print("⏭️ История пуста")
         tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         data = {
             "chat_id": chat_id,
@@ -98,21 +84,14 @@ def send_history_to_telegram(chat_id, count=10):
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "...\n\n(сообщение обрезано)"
     
-    print(f"📤 Отправляю историю в Telegram, длина текста: {len(full_text)} символов")
-    
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": chat_id,
         "text": full_text,
         "parse_mode": "Markdown"
     }
-    response = requests.post(tg_url, json=data)
-    
-    if response.status_code == 200:
-        print("✅ История успешно отправлена в Telegram")
-    else:
-        print(f"❌ Ошибка отправки в Telegram: {response.status_code}")
-        print(response.text)
+    requests.post(tg_url, json=data)
+    print(f"✅ История из {count} сообщений отправлена")
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -126,29 +105,39 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
     
     def do_POST(self):
+        print(f"\n[{datetime.now().strftime('%H:%M:%S')}] 📥 ПОЛУЧЕН POST ЗАПРОС!")
+        
         content_length = int(self.headers.get('Content-Length', 0))
         post_data = self.rfile.read(content_length)
         
-        try:
-            update = json.loads(post_data)
-            
-            if 'message' in update and 'text' in update['message']:
-                text = update['message']['text']
-                chat_id = update['message']['chat']['id']
+        if content_length > 0:
+            try:
+                update = json.loads(post_data)
+                print(f"📦 Данные: {json.dumps(update, indent=2, ensure_ascii=False)}")
                 
-                if str(chat_id) == str(TELEGRAM_CHAT_ID):
-                    if text.startswith('/h'):
-                        parts = text.split()
-                        count = 10
-                        if len(parts) > 1 and parts[1].isdigit():
-                            count = int(parts[1])
-                        
-                        print(f"📨 Получена команда /h с параметром {count}")
-                        send_history_to_telegram(chat_id, count)
-        except Exception as e:
-            print(f"❌ Ошибка обработки команды: {e}")
+                if 'message' in update and 'text' in update['message']:
+                    text = update['message']['text']
+                    chat_id = update['message']['chat']['id']
+                    
+                    print(f"📨 Текст команды: {text}")
+                    print(f"👥 Чат ID: {chat_id}")
+                    print(f"🎯 Ожидаемый чат: {TELEGRAM_CHAT_ID}")
+                    
+                    if str(chat_id) == str(TELEGRAM_CHAT_ID):
+                        if text.startswith('/h'):
+                            parts = text.split()
+                            count = 10
+                            if len(parts) > 1 and parts[1].isdigit():
+                                count = int(parts[1])
+                            
+                            print(f"✅ Получена команда /h с параметром {count}")
+                            send_history_to_telegram(chat_id, count)
+            except Exception as e:
+                print(f"❌ Ошибка обработки: {e}")
         
+        # Всегда отвечаем 200 OK
         self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
         self.end_headers()
         self.wfile.write(b"OK")
     
@@ -165,7 +154,7 @@ web_thread.start()
 # =====================
 
 def send_text_to_telegram(text, sender_name):
-    """Отправляет текстовое сообщение в Telegram в нужном формате"""
+    """Отправляет текстовое сообщение в Telegram"""
     full_message = f"📨 **MAX от {sender_name}:**\n \n{text}"
     
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -186,19 +175,18 @@ def send_text_to_telegram(text, sender_name):
         return False
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ДИАГНОСТИКОЙ /h)")
+print("🚀 МОСТ MAX → TELEGRAM (ИСПРАВЛЕННАЯ ВЕРСИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
 print(f"📬 Чат Telegram: {TELEGRAM_CHAT_ID}")
 print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
-print("📝 Команда /h - последние 10 сообщений, /h 5 - последние 5")
+print("📝 Команда /h - последние 10 сообщений")
 print("📊 Статистика каждые 10 сообщений\n")
 
 while True:
     try:
-        # Получаем последние 5 сообщений из истории
         history = get_chat_history(5)
         
         if history and isinstance(history, list):
@@ -209,7 +197,6 @@ while True:
                 if not msg_id or msg_id in processed_messages:
                     continue
                 
-                # Определяем отправителя по типу сообщения
                 if msg.get('type') == 'incoming':
                     sender_name = msg.get('senderName', 'Неизвестно')
                 else:
