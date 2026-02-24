@@ -24,12 +24,11 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 processed_ids = set()
 sent_edits = set()
 sent_deletes = set()
-message_cache = {}  # КЭШ: idMessage -> {"text": текст, "sender": имя, "timestamp": время}
+message_cache = {}
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
 def get_chat_history(count=10):
-    """Получает последние count сообщений из чата Max"""
     url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/GetChatHistory/{API_TOKEN}"
     payload = {
         "chatId": MAX_CHAT_ID,
@@ -43,17 +42,13 @@ def get_chat_history(count=10):
     except:
         return []
 
-# ===== ФУНКЦИЯ ДЛЯ ОБНОВЛЕНИЯ КЭША =====
 def update_message_cache(history):
-    """Обновляет кэш сообщений из истории"""
     if not history:
         return
     for msg in history:
         msg_id = msg.get('idMessage')
         if not msg_id:
             continue
-        
-        # Сохраняем текстовые сообщения
         if msg.get('typeMessage') == 'textMessage':
             text = msg.get('textMessage', '')
             if text:
@@ -64,27 +59,12 @@ def update_message_cache(history):
                     'sender': sender,
                     'timestamp': timestamp
                 }
-        
-        # Сохраняем информацию об ответах
-        if 'quotedMessage' in msg:
-            quoted = msg['quotedMessage']
-            quoted_id = quoted.get('stanzaId')
-            if quoted_id and quoted_id not in message_cache:
-                quoted_text = quoted.get('textMessage', '')
-                quoted_sender = quoted.get('senderName', 'Неизвестно')
-                if quoted_text:
-                    message_cache[quoted_id] = {
-                        'text': quoted_text,
-                        'sender': quoted_sender,
-                        'timestamp': timestamp - 1
-                    }
 
 def send_history_to_telegram(chat_id, count=10):
-    """Отправляет историю сообщений в Telegram"""
     history = get_chat_history(count)
     if not history or len(history) == 0:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
-                     json={"chat_id": chat_id, "text": "📭 Нет сообщений в истории за последние 14 дней"})
+                     json={"chat_id": chat_id, "text": "📭 Нет сообщений в истории"})
         return
     
     messages = []
@@ -113,7 +93,6 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
-        # Информация об ответе
         reply_prefix = ""
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
@@ -146,9 +125,7 @@ def send_history_to_telegram(chat_id, count=10):
                  json={"chat_id": chat_id, "text": full_text})
 
 def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_id=None):
-    """Отправляет текстовое сообщение в Telegram"""
     if is_edit and edit_id and edit_id in sent_edits:
-        print(f"⏭️ Редактирование {edit_id} уже отправлено, пропускаем")
         return False
     
     if is_edit:
@@ -173,9 +150,7 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_
         return False
 
 def send_deleted_notification(sender_name, deleted_text, delete_id):
-    """Отправляет уведомление об удалении сообщения в Telegram"""
     if delete_id and delete_id in sent_deletes:
-        print(f"⏭️ Уведомление об удалении {delete_id} уже отправлено")
         return False
     
     full_message = f"🗑️ {sender_name} удалил сообщение:\n\n{deleted_text}"
@@ -186,11 +161,9 @@ def send_deleted_notification(sender_name, deleted_text, delete_id):
         if response.status_code == 200:
             if delete_id:
                 sent_deletes.add(delete_id)
-            print(f"✅ Уведомление об удалении отправлено")
             return True
         return False
-    except Exception as e:
-        print(f"❌ Ошибка при отправке уведомления об удалении: {e}")
+    except:
         return False
 
 # ===== ВЕБ-СЕРВЕР =====
@@ -205,15 +178,13 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
     
     def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
-        
-        if content_length > 0:
-            try:
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            
+            if content_length > 0:
                 update = json.loads(post_data)
-                webhook_type = update.get('typeWebhook')
                 
-                # Обработка команд /h
                 if 'message' in update and 'text' in update['message']:
                     text = update['message']['text']
                     chat_id = update['message']['chat']['id']
@@ -224,80 +195,41 @@ class Handler(BaseHTTPRequestHandler):
                             count = int(parts[1])
                         send_history_to_telegram(chat_id, count)
                 
-                # Обработка редактирования сообщений
-                elif webhook_type == 'editedMessageWebhook':
-                    print(f"\n✏️ ПОЛУЧЕНО УВЕДОМЛЕНИЕ О РЕДАКТИРОВАНИИ!")
-                    
-                    body = update.get('body', {})
-                    message_data = body.get('messageData', {})
-                    sender_data = body.get('senderData', {})
-                    
-                    edited_data = message_data.get('editedMessageData', {})
-                    
-                    stanza_id = edited_data.get('stanzaId')
-                    new_text = edited_data.get('textMessage', '')
-                    sender_name = sender_data.get('senderName', 'Неизвестно')
-                    
-                    print(f"📎 Оригинальное сообщение ID: {stanza_id}")
-                    print(f"👤 От: {sender_name}")
-                    print(f"📝 Новый текст: {new_text[:50]}...")
-                    
-                    if stanza_id and new_text:
-                        edit_id = f"edit_{stanza_id}"
-                        if edit_id not in sent_edits:
-                            # Пытаемся найти информацию об ответе
-                            reply_info = ""
-                            if stanza_id in message_cache:
-                                pass
-                            else:
-                                history = get_chat_history(50)
-                                update_message_cache(history)
-                            
-                            send_text_to_telegram(new_text, sender_name, reply_info, is_edit=True, edit_id=edit_id)
+                # Обработка всех типов уведомлений
+                webhook_type = update.get('typeWebhook')
+                body = update.get('body', {})
+                message_data = body.get('messageData', {})
+                sender_data = body.get('senderData', {})
                 
-                # Обработка удаления сообщений - исправлено согласно документации [citation:4]
-                elif webhook_type == 'deletedMessageWebhook':
-                    print(f"\n🗑️ ПОЛУЧЕНО УВЕДОМЛЕНИЕ ОБ УДАЛЕНИИ!")
-                    
-                    body = update.get('body', {})
-                    sender_data = body.get('senderData', {})
-                    message_data = body.get('messageData', {})
+                # Проверяем, не является ли это удалением
+                if message_data.get('typeMessage') == 'deletedMessage':
                     deleted_data = message_data.get('deletedMessageData', {})
-                    
-                    # ID удалённого сообщения
                     stanza_id = deleted_data.get('stanzaId')
                     sender_name = sender_data.get('senderName', 'Неизвестно')
-                    
-                    print(f"📎 Удалено сообщение ID: {stanza_id}")
-                    print(f"👤 От: {sender_name}")
                     
                     if stanza_id:
                         delete_id = f"delete_{stanza_id}"
                         if delete_id not in sent_deletes:
-                            # Ищем текст в кэше
                             deleted_text = "Текст сообщения недоступен"
                             if stanza_id in message_cache:
                                 deleted_text = message_cache[stanza_id]['text']
-                                print(f"✅ Найден текст в кэше: {deleted_text[:50]}...")
-                            else:
-                                # Если нет в кэше, пробуем получить историю
-                                print("🔄 Текст не в кэше, запрашиваю историю...")
-                                history = get_chat_history(50)
-                                update_message_cache(history)
-                                if stanza_id in message_cache:
-                                    deleted_text = message_cache[stanza_id]['text']
-                                    print(f"✅ Найден текст в истории: {deleted_text[:50]}...")
-                            
                             send_deleted_notification(sender_name, deleted_text, delete_id)
                 
-                # Сбрасываем остальные типы уведомлений [citation:5]
-                else:
-                    print(f"⏭️ Пропущен тип уведомления: {webhook_type}")
+                # Проверяем, не является ли это редактированием
+                elif webhook_type == 'editedMessageWebhook':
+                    edited_data = message_data.get('editedMessageData', {})
+                    stanza_id = edited_data.get('stanzaId')
+                    new_text = edited_data.get('textMessage', '')
+                    sender_name = sender_data.get('senderName', 'Неизвестно')
                     
-            except Exception as e:
-                print(f"❌ Ошибка обработки: {e}")
+                    if stanza_id and new_text:
+                        edit_id = f"edit_{stanza_id}"
+                        if edit_id not in sent_edits:
+                            send_text_to_telegram(new_text, sender_name, is_edit=True, edit_id=edit_id)
+        except Exception as e:
+            print(f"❌ Ошибка: {e}")
         
-        # Всегда отвечаем 200 OK [citation:5]
+        # Всегда отвечаем 200 OK
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
@@ -315,21 +247,15 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ПОЛНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
 print(f"📬 Чат Telegram: {TELEGRAM_CHAT_ID}")
 print("=" * 50)
-print("🟢 Запущено. Опрос истории каждую секунду...")
-print("📝 Команда /h - последние 10 сообщений")
-print("👤 Твои сообщения: @scul_k")
-print("✏️ Редактирование поддерживается")
-print("🗑️ Удаление поддерживается")
-print("💬 Цитирование поддерживается\n")
+print("🟢 Запущено\n")
 
 last_cleanup = time.time()
-last_message_time = 0
 
 while True:
     try:
@@ -342,45 +268,24 @@ while True:
                 msg_id = msg.get('idMessage')
                 is_edited = msg.get('isEdited', False)
                 
-                if not msg_id:
+                if not msg_id or msg_id in processed_ids:
                     continue
-                
-                if msg_id in processed_ids and not is_edited:
-                    continue
-                
-                if is_edited:
-                    edit_key = f"edit_{msg_id}"
-                    if edit_key in sent_edits:
-                        continue
                 
                 if msg.get('typeMessage') != 'textMessage':
-                    if not is_edited:
-                        processed_ids.add(msg_id)
+                    processed_ids.add(msg_id)
                     continue
                 
-                timestamp = msg.get('timestamp', 0)
                 text = msg.get('textMessage', '')
                 if not text:
-                    if not is_edited:
-                        processed_ids.add(msg_id)
+                    processed_ids.add(msg_id)
                     continue
-                
-                if time.time() - last_message_time < 0.5:
-                    time.sleep(0.5)
                 
                 # Получаем информацию об ответе
                 reply_info = ""
                 if 'quotedMessage' in msg:
                     quoted = msg['quotedMessage']
-                    quoted_id = quoted.get('stanzaId')
                     quoted_text = quoted.get('textMessage', '')
                     quoted_sender = quoted.get('senderName', '')
-                    
-                    if quoted_id and quoted_id in message_cache:
-                        cached = message_cache[quoted_id]
-                        quoted_text = cached['text']
-                        quoted_sender = cached['sender']
-                    
                     if quoted_text:
                         if quoted_sender:
                             reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
@@ -392,27 +297,16 @@ while True:
                 else:
                     sender_name = "@scul_k"
                 
-                stats['total'] += 1
-                
                 if is_edited:
                     edit_id = f"edit_{msg_id}"
-                    if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_id):
-                        stats['sent'] += 1
-                        last_message_time = time.time()
-                    else:
-                        stats['skipped'] += 1
+                    if edit_id not in sent_edits:
+                        if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_id):
+                            sent_edits.add(edit_id)
                 else:
                     if send_text_to_telegram(text, sender_name, reply_info):
-                        stats['sent'] += 1
                         processed_ids.add(msg_id)
-                        last_message_time = time.time()
-                    else:
-                        stats['skipped'] += 1
-                
-                if stats['total'] % 10 == 0:
-                    print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
         
-        # Очистка старых данных раз в минуту
+        # Очистка
         if time.time() - last_cleanup > 60:
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
@@ -420,16 +314,11 @@ while True:
                 sent_edits = set(list(sent_edits)[-100:])
             if len(sent_deletes) > 100:
                 sent_deletes = set(list(sent_deletes)[-100:])
-            if len(message_cache) > 500:
-                cache_items = sorted(message_cache.items(), key=lambda x: x[1]['timestamp'], reverse=True)[:500]
-                message_cache = dict(cache_items)
             last_cleanup = time.time()
         
         time.sleep(1)
         
     except KeyboardInterrupt:
-        print("\n\n👋 Скрипт остановлен")
         break
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
+    except:
         time.sleep(5)
