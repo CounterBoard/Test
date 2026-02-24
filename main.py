@@ -21,10 +21,10 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
     raise ValueError(f"❌ Отсутствуют: {', '.join(missing)}")
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
-processed_ids = set()  # Только ID сообщений
-processed_texts = set()  # Для дополнительной защиты от дублей по тексту
+processed_ids = set()
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
+# ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
 def get_chat_history(count=10):
     """Получает последние count сообщений из чата Max"""
     url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/GetChatHistory/{API_TOKEN}"
@@ -49,7 +49,7 @@ def send_history_to_telegram(chat_id, count=10):
         return
     
     messages = []
-    seen_ids = set()  # для этой конкретной истории
+    seen_ids = set()
     
     for msg in reversed(history[:count]):
         msg_id = msg.get('idMessage')
@@ -74,9 +74,22 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
+        # Проверяем, есть ли ответ (цитирование)
+        reply_prefix = ""
+        if 'quotedMessage' in msg:
+            quoted = msg['quotedMessage']
+            quoted_text = quoted.get('textMessage', '')
+            quoted_sender = quoted.get('senderName', '')
+            if quoted_text:
+                if quoted_sender:
+                    reply_prefix = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
+                else:
+                    reply_prefix = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
+        
         if len(text) > 100:
             text = text[:100] + '...'
-        messages.append(f"{arrow} [{time_str}] {sender}:\n{text}")
+        
+        messages.append(f"{arrow} [{time_str}] {sender}:\n{reply_prefix}{text}")
     
     if not messages:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
@@ -90,9 +103,13 @@ def send_history_to_telegram(chat_id, count=10):
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
                  json={"chat_id": chat_id, "text": full_text})
 
-def send_text_to_telegram(text, sender_name):
-    """Отправляет текстовое сообщение в Telegram"""
-    full_message = f"📨 MAX от {sender_name}:\n{text}"
+def send_text_to_telegram(text, sender_name, reply_info=""):
+    """Отправляет текстовое сообщение в Telegram с поддержкой ответов"""
+    if reply_info:
+        full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
+    else:
+        full_message = f"📨 MAX от {sender_name}:\n{text}"
+    
     try:
         response = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                                 json={"chat_id": TELEGRAM_CHAT_ID, "text": full_message}, timeout=10)
@@ -147,7 +164,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (БЕЗ ДУБЛЕЙ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ЦИТИРОВАНИЕМ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -155,31 +172,28 @@ print(f"📬 Чат Telegram: {TELEGRAM_CHAT_ID}")
 print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("📝 Команда /h - последние 10 сообщений")
-print("👤 Твои сообщения: @scul_k\n")
+print("👤 Твои сообщения: @scul_k")
+print("💬 Цитирование поддерживается\n")
 
 last_cleanup = time.time()
 
 while True:
     try:
-        history = get_chat_history(15)  # запрашиваем больше, чтобы точно поймать
+        history = get_chat_history(15)
         
         if history and isinstance(history, list):
-            # Проходим с конца (новые сообщения)
             for msg in reversed(history):
                 msg_id = msg.get('idMessage')
                 
-                # Обязательная проверка ID
                 if not msg_id or msg_id in processed_ids:
                     continue
                 
-                # Пропускаем служебные
                 if msg.get('typeMessage') != 'textMessage':
                     processed_ids.add(msg_id)
                     continue
                 
-                # Проверяем возраст
                 timestamp = msg.get('timestamp', 0)
-                if time.time() - timestamp > 20:
+                if time.time() - timestamp > 30:
                     processed_ids.add(msg_id)
                     continue
                 
@@ -188,39 +202,38 @@ while True:
                     processed_ids.add(msg_id)
                     continue
                 
-                # Определяем отправителя
+                # 👇 ПОЛУЧАЕМ ИНФОРМАЦИЮ ОБ ОТВЕТЕ
+                reply_info = ""
+                if 'quotedMessage' in msg:
+                    quoted = msg['quotedMessage']
+                    quoted_text = quoted.get('textMessage', '')
+                    quoted_sender = quoted.get('senderName', '')
+                    if quoted_text:
+                        if quoted_sender:
+                            reply_info = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
+                        else:
+                            reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
+                        print(f"📎 Найден ответ на: {quoted_text[:30]}...")
+                
                 if msg.get('type') == 'incoming':
                     sender_name = msg.get('senderName', 'Неизвестно')
                 else:
                     sender_name = "@scul_k"
                 
-                # Финальная проверка: если это сообщение от @scul_k, убедимся что нет похожего
-                if sender_name == "@scul_k":
-                    text_key = f"{text}_{timestamp}"
-                    if text_key in processed_texts:
-                        processed_ids.add(msg_id)
-                        continue
-                    processed_texts.add(text_key)
-                
-                # Отправляем
                 stats['total'] += 1
-                if send_text_to_telegram(text, sender_name):
+                if send_text_to_telegram(text, sender_name, reply_info):
                     stats['sent'] += 1
                     processed_ids.add(msg_id)
                 else:
                     stats['skipped'] += 1
                 
-                # Статистика
                 if stats['total'] % 10 == 0:
                     print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
         
-        # Очистка старых данных раз в минуту
+        # Очистка старых ID раз в минуту
         if time.time() - last_cleanup > 60:
-            # Оставляем только последние 500 ID
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
-            # Очищаем текстовые дубли (они не должны накапливаться)
-            processed_texts.clear()
             last_cleanup = time.time()
         
         time.sleep(1)
