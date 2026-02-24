@@ -1,12 +1,8 @@
 import os
 import requests
 import json
-from dotenv import load_dotenv
 
-# Загружаем переменные из .env файла (если используешь локально)
-load_dotenv()
-
-# Берём данные из переменных окружения
+# Берём данные из переменных окружения Render
 ID_INSTANCE = os.environ.get('ID_INSTANCE')
 API_TOKEN = os.environ.get('API_TOKEN')
 MAX_CHAT_ID = os.environ.get('MAX_CHAT_ID')
