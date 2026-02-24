@@ -304,12 +304,59 @@ while True:
                         deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
                         send_deleted_notification(sender_name, deleted_text, msg_id)
             
-            # Обычные сообщения
+            # 👇 ОБРАБОТКА СООБЩЕНИЙ (сначала редактирования, потом новые)
             for msg in reversed(history):
                 msg_id = msg.get('idMessage')
                 is_edited = msg.get('isEdited', False)
                 
-                if not msg_id or msg_id in processed_ids:
+                if not msg_id:
+                    continue
+                
+                # 🎯 ПРИОРИТЕТ 1: Отредактированные сообщения
+                if is_edited:
+                    edit_key = f"edit_{msg_id}"
+                    if edit_key in sent_edits:
+                        continue
+                        
+                    if msg.get('typeMessage') != 'textMessage':
+                        continue
+                        
+                    text = msg.get('textMessage', '')
+                    if not text:
+                        continue
+                        
+                    print(f"\n✏️ НАЙДЕНО ОТРЕДАКТИРОВАННОЕ СООБЩЕНИЕ В ИСТОРИИ!")
+                    print(f"   ID: {msg_id}")
+                    print(f"   Текст: {text[:50]}...")
+                    
+                    # Получаем информацию об ответе
+                    reply_info = ""
+                    if 'quotedMessage' in msg:
+                        quoted = msg['quotedMessage']
+                        quoted_text = quoted.get('textMessage', '')
+                        quoted_sender = quoted.get('senderName', '')
+                        if quoted_text:
+                            if quoted_sender:
+                                reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
+                            else:
+                                reply_info = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
+                    
+                    if msg.get('type') == 'incoming':
+                        sender_name = msg.get('senderName', 'Неизвестно')
+                    else:
+                        sender_name = "@scul_k"
+                    
+                    if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_key):
+                        sent_edits.add(edit_key)
+                        stats['sent'] += 1
+                        print(f"✅ Отредактированное сообщение отправлено")
+                    else:
+                        stats['skipped'] += 1
+                    
+                    continue  # переходим к следующему сообщению
+                
+                # 🎯 ПРИОРИТЕТ 2: Обычные сообщения (уже обработанные пропускаем)
+                if msg_id in processed_ids:
                     continue
                 
                 if msg.get('typeMessage') != 'textMessage' or msg.get('isDeleted'):
@@ -343,22 +390,12 @@ while True:
                 
                 stats['total'] += 1
                 
-                if is_edited:
-                    edit_id = f"edit_{msg_id}"
-                    if edit_id not in sent_edits:
-                        if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_id):
-                            sent_edits.add(edit_id)
-                            stats['sent'] += 1
-                            last_message_time = time.time()
-                        else:
-                            stats['skipped'] += 1
+                if send_text_to_telegram(text, sender_name, reply_info):
+                    processed_ids.add(msg_id)
+                    stats['sent'] += 1
+                    last_message_time = time.time()
                 else:
-                    if send_text_to_telegram(text, sender_name, reply_info):
-                        processed_ids.add(msg_id)
-                        stats['sent'] += 1
-                        last_message_time = time.time()
-                    else:
-                        stats['skipped'] += 1
+                    stats['skipped'] += 1
                 
                 if stats['total'] % 10 == 0:
                     print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
