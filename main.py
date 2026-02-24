@@ -22,10 +22,9 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
 processed_messages = set()
-last_message_time = 0
+recent_ids = []
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
-# ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
 def get_chat_history(count=10):
     """Получает последние count сообщений из чата Max"""
     url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/GetChatHistory/{API_TOKEN}"
@@ -33,38 +32,26 @@ def get_chat_history(count=10):
         "chatId": MAX_CHAT_ID,
         "count": min(count, 100)
     }
-    
     try:
         response = requests.post(url, json=payload, timeout=10)
         if response.status_code == 200:
             return response.json()
-        else:
-            return []
-    except Exception as e:
+        return []
+    except:
         return []
 
 def send_history_to_telegram(chat_id, count=10):
     """Отправляет историю сообщений в Telegram"""
     history = get_chat_history(count)
-    
     if not history or len(history) == 0:
-        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        data = {
-            "chat_id": chat_id,
-            "text": "📭 Нет сообщений в истории"
-        }
-        requests.post(tg_url, json=data)
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                     json={"chat_id": chat_id, "text": "📭 Нет сообщений в истории"})
         return
     
     messages = []
     for msg in reversed(history[:count]):
-        # Пропускаем служебные сообщения
-        if msg.get('typeMessage') in ['deletedMessage', 'editedMessage', 'pollMessage']:
-            continue
-        
         if msg.get('typeMessage') != 'textMessage':
             continue
-        
         text = msg.get('textMessage', '')
         if not text:
             continue
@@ -81,41 +68,26 @@ def send_history_to_telegram(chat_id, count=10):
         
         if len(text) > 100:
             text = text[:100] + '...'
-        
         messages.append(f"{arrow} [{time_str}] {sender}:\n{text}")
     
     if not messages:
-        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-        data = {
-            "chat_id": chat_id,
-            "text": "📭 В истории нет текстовых сообщений"
-        }
-        requests.post(tg_url, json=data)
+        requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                     json={"chat_id": chat_id, "text": "📭 В истории нет текстовых сообщений"})
         return
     
     full_text = f"📜 История чата (последние {len(messages)}):\n\n" + "\n\n".join(messages)
-    
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "...\n\n(сообщение обрезано)"
     
-    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {
-        "chat_id": chat_id,
-        "text": full_text
-    }
-    requests.post(tg_url, json=data)
+    requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
+                 json={"chat_id": chat_id, "text": full_text})
 
 def send_text_to_telegram(text, sender_name):
     """Отправляет текстовое сообщение в Telegram"""
     full_message = f"📨 MAX от {sender_name}:\n{text}"
-    
-    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    tg_data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": full_message
-    }
     try:
-        response = requests.post(tg_url, json=tg_data, timeout=10)
+        response = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                                json={"chat_id": TELEGRAM_CHAT_ID, "text": full_message}, timeout=10)
         return response.status_code == 200
     except:
         return False
@@ -138,11 +110,9 @@ class Handler(BaseHTTPRequestHandler):
         if content_length > 0:
             try:
                 update = json.loads(post_data)
-                
                 if 'message' in update and 'text' in update['message']:
                     text = update['message']['text']
                     chat_id = update['message']['chat']['id']
-                    
                     if str(chat_id) == str(TELEGRAM_CHAT_ID) and text.startswith('/h'):
                         parts = text.split()
                         count = 10
@@ -169,18 +139,13 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛ)")
+print("🚀 МОСТ MAX → TELEGRAM (ДИАГНОСТИКА ОТВЕТОВ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
 print(f"📬 Чат Telegram: {TELEGRAM_CHAT_ID}")
 print("=" * 50)
-print("🟢 Запущено. Опрос истории каждую секунду...")
-print("📝 Команда /h - последние 10 сообщений")
-print("👤 Твои сообщения: @scul_k\n")
-
-# Запоминаем последние 10 ID для предотвращения дублей
-recent_ids = []
+print("🟢 Запущено. Отправьте СООБЩЕНИЕ С ОТВЕТОМ\n")
 
 while True:
     try:
@@ -190,7 +155,6 @@ while True:
             for msg in history:
                 msg_id = msg.get('idMessage')
                 
-                # Пропускаем если уже обработано или служебное
                 if not msg_id or msg_id in processed_messages:
                     continue
                 
@@ -198,7 +162,6 @@ while True:
                     processed_messages.add(msg_id)
                     continue
                 
-                # Проверяем, не дубль ли это (похожий текст и время)
                 timestamp = msg.get('timestamp', 0)
                 if time.time() - timestamp > 30:
                     processed_messages.add(msg_id)
@@ -209,32 +172,30 @@ while True:
                     processed_messages.add(msg_id)
                     continue
                 
+                # 👇 ДИАГНОСТИКА ОТВЕТОВ
+                if 'quotedMessage' in msg:
+                    print("\n" + "="*50)
+                    print("🔥 НАЙДЕНО СООБЩЕНИЕ С ОТВЕТОМ!")
+                    print(f"📝 Текст: {text}")
+                    print("📦 Данные quotedMessage:")
+                    print(json.dumps(msg['quotedMessage'], indent=2, ensure_ascii=False))
+                    print("="*50 + "\n")
+                
                 if msg.get('type') == 'incoming':
                     sender_name = msg.get('senderName', 'Неизвестно')
                 else:
                     sender_name = "@scul_k"
                 
-                # Проверка на дубликат по тексту и времени
-                is_duplicate = False
-                for recent_id in recent_ids[-5:]:
-                    if recent_id == msg_id:
-                        is_duplicate = True
-                        break
+                # Отправляем как обычно (без ответов)
+                if msg_id not in recent_ids[-10:]:
+                    stats['total'] += 1
+                    if send_text_to_telegram(text, sender_name):
+                        stats['sent'] += 1
+                        processed_messages.add(msg_id)
+                        recent_ids.append(msg_id)
+                    else:
+                        stats['skipped'] += 1
                 
-                if is_duplicate:
-                    processed_messages.add(msg_id)
-                    continue
-                
-                # Отправляем
-                stats['total'] += 1
-                if send_text_to_telegram(text, sender_name):
-                    stats['sent'] += 1
-                    processed_messages.add(msg_id)
-                    recent_ids.append(msg_id)
-                else:
-                    stats['skipped'] += 1
-                
-                # Ограничиваем размер
                 if len(processed_messages) > 1000:
                     processed_messages = set(list(processed_messages)[-500:])
                 if len(recent_ids) > 20:
