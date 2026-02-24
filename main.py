@@ -21,19 +21,113 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
     raise ValueError(f"❌ Отсутствуют: {', '.join(missing)}")
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
-processed_messages = set()  # ID сообщений, которые уже отправили
+processed_messages = set()
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
-# ===== ВЕБ-СЕРВЕР ДЛЯ RENDER =====
+# ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
+def get_chat_history(count=10):
+    """Получает последние count сообщений из чата Max"""
+    url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/GetChatHistory/{API_TOKEN}"
+    payload = {
+        "chatId": MAX_CHAT_ID,
+        "count": min(count, 100)
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            print(f"❌ Ошибка получения истории: {response.status_code}")
+            return None
+    except Exception as e:
+        print(f"❌ Ошибка получения истории: {e}")
+        return None
+
+def send_history_to_telegram(chat_id, count=10):
+    """Отправляет историю сообщений в Telegram"""
+    history = get_chat_history(count)
+    
+    if not history or len(history) == 0:
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": chat_id,
+            "text": "📭 Нет сообщений в истории"
+        }
+        requests.post(tg_url, json=data)
+        return
+    
+    messages = []
+    for msg in reversed(history[:count]):  # новые внизу
+        msg_type = msg.get('type', '')
+        sender = msg.get('senderName', 'Неизвестно')
+        text = msg.get('textMessage', '')
+        timestamp = msg.get('timestamp', 0)
+        
+        time_str = datetime.fromtimestamp(timestamp).strftime('%H:%M %d.%m')
+        
+        # Определяем тип сообщения и отправителя
+        if msg_type == 'incoming':
+            arrow = '📥'
+        else:
+            arrow = '📤'
+            sender = 'ымел осла'  # твоё имя для исходящих
+        
+        if len(text) > 100:
+            text = text[:100] + '...'
+        
+        messages.append(f"{arrow} [{time_str}] {sender}:\n{text}")
+    
+    full_text = f"📜 **История чата (последние {len(messages)}):**\n\n" + "\n\n".join(messages)
+    
+    if len(full_text) > 4000:
+        full_text = full_text[:4000] + "...\n\n(сообщение обрезано)"
+    
+    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    data = {
+        "chat_id": chat_id,
+        "text": full_text,
+        "parse_mode": "Markdown"
+    }
+    requests.post(tg_url, json=data)
+    print(f"📜 История из {count} сообщений отправлена в Telegram")
+
+# ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
-        self.wfile.write(b"Bridge is running (history mode)")
+        self.wfile.write(b"Bridge is running")
     
     def do_HEAD(self):
         self.send_response(200)
         self.end_headers()
+    
+    def do_POST(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+        
+        try:
+            update = json.loads(post_data)
+            
+            if 'message' in update and 'text' in update['message']:
+                text = update['message']['text']
+                chat_id = update['message']['chat']['id']
+                
+                if str(chat_id) == str(TELEGRAM_CHAT_ID):
+                    if text.startswith('/h'):
+                        parts = text.split()
+                        count = 10
+                        if len(parts) > 1 and parts[1].isdigit():
+                            count = int(parts[1])
+                        
+                        print(f"📨 Получена команда /h с параметром {count}")
+                        send_history_to_telegram(chat_id, count)
+        except Exception as e:
+            print(f"❌ Ошибка обработки команды: {e}")
+        
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"OK")
     
     def log_message(self, format, *args): pass
 
@@ -45,29 +139,10 @@ def run_http_server():
 
 web_thread = threading.Thread(target=run_http_server, daemon=True)
 web_thread.start()
-# =================================
-
-def get_chat_history(count=5):
-    """Получает последние сообщения из истории чата"""
-    url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/GetChatHistory/{API_TOKEN}"
-    payload = {
-        "chatId": MAX_CHAT_ID,
-        "count": count
-    }
-    try:
-        response = requests.post(url, json=payload, timeout=10)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            print(f"❌ Ошибка получения истории: {response.status_code}")
-            return None
-    except Exception as e:
-        print(f"❌ Ошибка при запросе истории: {e}")
-        return None
+# =====================
 
 def send_text_to_telegram(text, sender_name):
     """Отправляет текстовое сообщение в Telegram в нужном формате"""
-    # Заголовок, затем пробел на новой строке, затем текст
     full_message = f"📨 **MAX от {sender_name}:**\n \n{text}"
     
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -88,15 +163,17 @@ def send_text_to_telegram(text, sender_name):
         return False
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (РЕЖИМ ИСТОРИИ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ИСТОРИЕЙ И КОМАНДОЙ /h)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
 print(f"📬 Чат Telegram: {TELEGRAM_CHAT_ID}")
 print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
-print("⏱️ Максимальная задержка: 1 секунда")
-print("📊 Статистика будет каждые 10 сообщений\n")
+print("📝 Команда /h - последние 10 сообщений, /h 5 - последние 5")
+print("📊 Статистика каждые 10 сообщений\n")
+
+receive_url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/receiveNotification/{API_TOKEN}"
 
 while True:
     try:
@@ -108,19 +185,14 @@ while True:
                 msg_id = msg.get('idMessage')
                 timestamp = msg.get('timestamp', 0)
                 
-                # Пропускаем уже обработанные
                 if not msg_id or msg_id in processed_messages:
                     continue
                 
-                # Определяем отправителя
                 if msg.get('type') == 'incoming':
-                    # Входящие сообщения от других людей
                     sender_name = msg.get('senderName', 'Неизвестно')
                 else:
-                    # Твои сообщения
                     sender_name = "ымел осла"
                 
-                # Текстовые сообщения
                 if msg.get('typeMessage') == 'textMessage':
                     text = msg.get('textMessage', '')
                     if text:
@@ -136,17 +208,14 @@ while True:
                         else:
                             stats['skipped'] += 1
                 
-                # Медиа сообщения (пока просто логируем)
                 elif msg.get('typeMessage') in ['imageMessage', 'videoMessage', 'documentMessage', 'audioMessage']:
                     print(f"\n📥 МЕДИА от {sender_name} (пока не обрабатывается)")
                     processed_messages.add(msg_id)
                     stats['skipped'] += 1
                 
-                # Ограничиваем размер хранилища
                 if len(processed_messages) > 1000:
                     processed_messages = set(list(processed_messages)[-500:])
                 
-                # Статистика каждые 10 сообщений
                 if stats['total'] > 0 and stats['total'] % 10 == 0:
                     print("\n" + "="*50)
                     print("📊 СТАТИСТИКА:")
@@ -155,7 +224,6 @@ while True:
                     print(f"⏭️ Пропущено: {stats['skipped']}")
                     print("="*50)
         
-        # Ждём 1 секунду (соблюдаем лимит API)
         time.sleep(1)
         
     except KeyboardInterrupt:
