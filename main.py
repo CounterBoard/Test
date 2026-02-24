@@ -86,10 +86,13 @@ def send_history_to_telegram(chat_id, count=10):
                 else:
                     reply_prefix = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
         
+        # Добавляем пометку о редактировании, если есть [citation:7]
+        edit_mark = " ✏️" if msg.get('isEdited') else ""
+        
         if len(text) > 100:
             text = text[:100] + '...'
         
-        messages.append(f"{arrow} [{time_str}] {sender}:\n{reply_prefix}{text}")
+        messages.append(f"{arrow} [{time_str}] {sender}{edit_mark}:\n{reply_prefix}{text}")
     
     if not messages:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
@@ -117,6 +120,29 @@ def send_text_to_telegram(text, sender_name, reply_info=""):
     except:
         return False
 
+# ===== НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ РЕДАКТИРОВАНИЯ =====
+def handle_edited_message(stanza_id, new_text, sender_name):
+    """Отправляет уведомление о редактировании сообщения в Telegram [citation:7]"""
+    full_message = f"✏️ **MAX от {sender_name} отредактировал сообщение:**\n{new_text}"
+    
+    try:
+        response = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": full_message,
+                "parse_mode": "Markdown"
+            },
+            timeout=10
+        )
+        if response.status_code == 200:
+            print(f"✅ Уведомление о редактировании отправлено")
+        else:
+            print(f"❌ Ошибка Telegram: {response.status_code}")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке уведомления о редактировании: {e}")
+# =====================================================
+
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -135,6 +161,11 @@ class Handler(BaseHTTPRequestHandler):
         if content_length > 0:
             try:
                 update = json.loads(post_data)
+                
+                # Получаем тип вебхука [citation:7]
+                webhook_type = update.get('typeWebhook')
+                
+                # Обработка команд /h
                 if 'message' in update and 'text' in update['message']:
                     text = update['message']['text']
                     chat_id = update['message']['chat']['id']
@@ -144,8 +175,33 @@ class Handler(BaseHTTPRequestHandler):
                         if len(parts) > 1 and parts[1].isdigit():
                             count = int(parts[1])
                         send_history_to_telegram(chat_id, count)
-            except:
-                pass
+                
+                # 👇 НОВОЕ: обработка редактирования сообщений [citation:7]
+                elif webhook_type == 'editedMessageWebhook':
+                    print(f"\n✏️ [{datetime.now().strftime('%H:%M:%S')}] ПОЛУЧЕНО УВЕДОМЛЕНИЕ О РЕДАКТИРОВАНИИ!")
+                    
+                    # Извлекаем данные
+                    body = update.get('body', {})
+                    message_data = body.get('messageData', {})
+                    sender_data = body.get('senderData', {})
+                    
+                    # В editedMessageWebhook данные лежат в editedMessageData [citation:7]
+                    edited_data = message_data.get('editedMessageData', {})
+                    
+                    # stanzaId - ID оригинального сообщения, которое было отредактировано [citation:7]
+                    stanza_id = edited_data.get('stanzaId')
+                    new_text = edited_data.get('textMessage', '')
+                    sender_name = sender_data.get('senderName', 'Неизвестно')
+                    
+                    print(f"📎 Оригинальное сообщение ID: {stanza_id}")
+                    print(f"👤 От: {sender_name}")
+                    print(f"📝 Новый текст: {new_text[:50]}...")
+                    
+                    if stanza_id and new_text:
+                        # Отправляем уведомление в Telegram
+                        handle_edited_message(stanza_id, new_text, sender_name)
+            except Exception as e:
+                print(f"❌ Ошибка обработки: {e}")
         
         self.send_response(200)
         self.end_headers()
@@ -164,7 +220,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ЦИТИРОВАНИЕМ)")
+print("🚀 МОСТ MAX → TELEGRAM (С РЕДАКТИРОВАНИЕМ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -173,6 +229,7 @@ print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("📝 Команда /h - последние 10 сообщений")
 print("👤 Твои сообщения: @scul_k")
+print("✏️ Редактирование поддерживается")
 print("💬 Цитирование поддерживается\n")
 
 last_cleanup = time.time()
@@ -202,7 +259,7 @@ while True:
                     processed_ids.add(msg_id)
                     continue
                 
-                # 👇 ПОЛУЧАЕМ ИНФОРМАЦИЮ ОБ ОТВЕТЕ
+                # Получаем информацию об ответе (цитирование)
                 reply_info = ""
                 if 'quotedMessage' in msg:
                     quoted = msg['quotedMessage']
