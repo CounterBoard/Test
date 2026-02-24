@@ -22,7 +22,7 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
 processed_messages = set()
-last_message_time = 0
+last_processed_time = 0
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -166,7 +166,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (БЕЗ ДУБЛЕЙ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -177,8 +177,8 @@ print("📝 Команда /h - последние 10 сообщений")
 print("📊 Статистика каждые 10 сообщений")
 print("👤 Твои сообщения: @scul_k\n")
 
-# Храним последние 10 ID для предотвращения дублей
-recent_ids = []
+# Получаем текущее время для фильтрации старых сообщений
+start_time = time.time()
 
 while True:
     try:
@@ -190,13 +190,12 @@ while True:
                 msg_id = msg.get('idMessage')
                 timestamp = msg.get('timestamp', 0)
                 
-                # Пропускаем если уже обработано
-                if not msg_id or msg_id in processed_messages:
+                # Пропускаем старые сообщения (до запуска скрипта)
+                if timestamp < start_time - 5:
                     continue
                 
-                # Проверяем, не слишком ли старое сообщение (старше 10 секунд)
-                if time.time() - timestamp > 10:
-                    processed_messages.add(msg_id)
+                # Пропускаем если уже обработано
+                if not msg_id or msg_id in processed_messages:
                     continue
                 
                 if msg.get('type') == 'incoming':
@@ -216,7 +215,6 @@ while True:
                         if send_text_to_telegram(text, sender_name):
                             stats['sent'] += 1
                             processed_messages.add(msg_id)
-                            recent_ids.append(msg_id)
                         else:
                             stats['skipped'] += 1
                 
@@ -224,24 +222,21 @@ while True:
                     print(f"\n📥 МЕДИА от {sender_name} (пока не обрабатывается)")
                     processed_messages.add(msg_id)
                     stats['skipped'] += 1
-                
-                # Ограничиваем размер хранилища
-                if len(processed_messages) > 1000:
-                    # Оставляем только последние 500
-                    processed_messages = set(list(processed_messages)[-500:])
-                
-                if len(recent_ids) > 50:
-                    recent_ids = recent_ids[-50:]
-                
-                if stats['total'] > 0 and stats['total'] % 10 == 0:
-                    print("\n" + "="*50)
-                    print("📊 СТАТИСТИКА:")
-                    print(f"📥 Всего новых: {stats['total']}")
-                    print(f"✅ Отправлено: {stats['sent']}")
-                    print(f"⏭️ Пропущено: {stats['skipped']}")
-                    print("="*50)
+            
+            # Ограничиваем размер хранилища
+            if len(processed_messages) > 1000:
+                # Оставляем только последние 500
+                processed_messages = set(list(processed_messages)[-500:])
+            
+            if stats['total'] > 0 and stats['total'] % 10 == 0:
+                print("\n" + "="*50)
+                print("📊 СТАТИСТИКА:")
+                print(f"📥 Всего новых: {stats['total']}")
+                print(f"✅ Отправлено: {stats['sent']}")
+                print(f"⏭️ Пропущено: {stats['skipped']}")
+                print("="*50)
         
-        time.sleep(1)
+        time.sleep(2)  # Увеличил до 2 секунд для надёжности
         
     except KeyboardInterrupt:
         print("\n\n👋 Скрипт остановлен")
