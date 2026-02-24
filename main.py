@@ -22,7 +22,7 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
 processed_ids = set()
-sent_edits = set()  # отдельно храним отправленные редактирования
+sent_edits = set()
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -75,6 +75,7 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
+        # Получаем информацию об ответе
         reply_prefix = ""
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
@@ -107,13 +108,16 @@ def send_history_to_telegram(chat_id, count=10):
 
 def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_id=None):
     """Отправляет текстовое сообщение в Telegram"""
-    # Проверяем, не отправляли ли уже это редактирование
     if is_edit and edit_id and edit_id in sent_edits:
         print(f"⏭️ Редактирование {edit_id} уже отправлено, пропускаем")
         return False
     
     if is_edit:
-        full_message = f"✏️ {sender_name} отредактировал сообщение:\n{text}"
+        # Для редактирования показываем, что это ответ, если он был
+        if reply_info:
+            full_message = f"{reply_info}✏️ {sender_name} отредактировал сообщение:\n{text}"
+        else:
+            full_message = f"✏️ {sender_name} отредактировал сообщение:\n{text}"
     elif reply_info:
         full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
     else:
@@ -180,9 +184,9 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"📝 Новый текст: {new_text[:50]}...")
                     
                     if stanza_id and new_text:
-                        # Отправляем с проверкой на дубли
                         edit_id = f"edit_{stanza_id}"
                         if edit_id not in sent_edits:
+                            # Для вебхуков информация об ответе не приходит, поэтому отправляем без reply_info
                             send_text_to_telegram(new_text, sender_name, is_edit=True, edit_id=edit_id)
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
@@ -204,7 +208,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (БЕЗ ДУБЛЕЙ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ОТВЕТАМИ В РЕДАКТИРОВАНИЯХ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -213,7 +217,7 @@ print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("📝 Команда /h - последние 10 сообщений")
 print("👤 Твои сообщения: @scul_k")
-print("✏️ Редактирование поддерживается")
+print("✏️ Редактирование с ответами поддерживается")
 print("💬 Цитирование поддерживается\n")
 
 last_cleanup = time.time()
@@ -231,11 +235,9 @@ while True:
                 if not msg_id:
                     continue
                 
-                # Пропускаем обычные сообщения, если уже обработаны
                 if msg_id in processed_ids and not is_edited:
                     continue
                 
-                # Для отредактированных проверяем отдельно
                 if is_edited:
                     edit_key = f"edit_{msg_id}"
                     if edit_key in sent_edits:
@@ -253,11 +255,10 @@ while True:
                         processed_ids.add(msg_id)
                     continue
                 
-                # Защита от слишком частых отправок
                 if time.time() - last_message_time < 0.5:
                     time.sleep(0.5)
                 
-                # Получаем информацию об ответе
+                # 👇 ПОЛУЧАЕМ ИНФОРМАЦИЮ ОБ ОТВЕТЕ (ЦИТИРОВАНИИ)
                 reply_info = ""
                 if 'quotedMessage' in msg:
                     quoted = msg['quotedMessage']
@@ -268,6 +269,7 @@ while True:
                             reply_info = f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
                         else:
                             reply_info = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
+                        print(f"📎 Найден ответ на: {quoted_text[:30]}...")
                 
                 if msg.get('type') == 'incoming':
                     sender_name = msg.get('senderName', 'Неизвестно')
@@ -276,7 +278,6 @@ while True:
                 
                 stats['total'] += 1
                 
-                # Для отредактированных используем edit_id
                 if is_edited:
                     edit_id = f"edit_{msg_id}"
                     if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_id):
