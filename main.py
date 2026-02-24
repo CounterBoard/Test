@@ -24,7 +24,7 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 processed_ids = set()
 sent_edits = set()
 sent_deletes = set()
-deleted_messages_cache = {}  # кэш для удалённых сообщений: id -> текст
+message_cache = {}  # КЭШ: idMessage -> {"text": текст, "sender": имя, "timestamp": время}
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -43,6 +43,42 @@ def get_chat_history(count=10):
     except:
         return []
 
+# ===== ФУНКЦИЯ ДЛЯ ОБНОВЛЕНИЯ КЭША =====
+def update_message_cache(history):
+    """Обновляет кэш сообщений из истории"""
+    if not history:
+        return
+    for msg in history:
+        msg_id = msg.get('idMessage')
+        if not msg_id:
+            continue
+        
+        # Сохраняем текстовые сообщения
+        if msg.get('typeMessage') == 'textMessage':
+            text = msg.get('textMessage', '')
+            if text:
+                sender = msg.get('senderName', 'Неизвестно') if msg.get('type') == 'incoming' else "@scul_k"
+                timestamp = msg.get('timestamp', 0)
+                message_cache[msg_id] = {
+                    'text': text,
+                    'sender': sender,
+                    'timestamp': timestamp
+                }
+        
+        # Также сохраняем информацию об ответах, если есть
+        if 'quotedMessage' in msg:
+            quoted = msg['quotedMessage']
+            quoted_id = quoted.get('stanzaId')
+            if quoted_id and quoted_id not in message_cache:
+                quoted_text = quoted.get('textMessage', '')
+                quoted_sender = quoted.get('senderName', 'Неизвестно')
+                if quoted_text:
+                    message_cache[quoted_id] = {
+                        'text': quoted_text,
+                        'sender': quoted_sender,
+                        'timestamp': timestamp - 1  # чуть раньше
+                    }
+
 def send_history_to_telegram(chat_id, count=10):
     """Отправляет историю сообщений в Telegram"""
     history = get_chat_history(count)
@@ -60,10 +96,7 @@ def send_history_to_telegram(chat_id, count=10):
             continue
         seen_ids.add(msg_id)
         
-        # Сохраняем текст в кэш для возможного удаления
-        if msg.get('typeMessage') == 'textMessage':
-            deleted_messages_cache[msg_id] = msg.get('textMessage', '')
-        
+        # Пропускаем служебные сообщения в истории
         if msg.get('typeMessage') in ['deletedMessage']:
             continue
             
@@ -84,7 +117,7 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
-        # 👇 ПУСТАЯ СТРОКА ПОСЛЕ ИМЕНИ
+        # Получаем информацию об ответе
         reply_prefix = ""
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
@@ -217,23 +250,17 @@ class Handler(BaseHTTPRequestHandler):
                         if edit_id not in sent_edits:
                             # Пытаемся найти информацию об ответе для редактируемого сообщения
                             reply_info = ""
-                            history = get_chat_history(50)
-                            for msg in history:
-                                if msg.get('idMessage') == stanza_id:
-                                    if 'quotedMessage' in msg:
-                                        quoted = msg['quotedMessage']
-                                        quoted_text = quoted.get('textMessage', '')
-                                        quoted_sender = quoted.get('senderName', '')
-                                        if quoted_text:
-                                            if quoted_sender:
-                                                reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
-                                            else:
-                                                reply_info = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
-                                    break
+                            if stanza_id in message_cache:
+                                # Если есть в кэше, используем
+                                pass
+                            else:
+                                # Если нет в кэше, пробуем получить историю
+                                history = get_chat_history(50)
+                                update_message_cache(history)
                             
                             send_text_to_telegram(new_text, sender_name, reply_info, is_edit=True, edit_id=edit_id)
                 
-                # 👇 ОБНОВЛЁННАЯ ОБРАБОТКА УДАЛЕНИЯ
+                # Обработка удаления сообщений
                 elif webhook_type == 'incomingMessageReceived' or webhook_type == 'outgoingMessageReceived':
                     # Проверяем, не является ли это сообщением об удалении
                     message_data = update.get('body', {}).get('messageData', {})
@@ -252,23 +279,22 @@ class Handler(BaseHTTPRequestHandler):
                         print(f"📎 Удалено сообщение ID: {stanza_id}")
                         print(f"👤 От: {sender_name}")
                         
-                        # Пытаемся найти текст удалённого сообщения
-                        deleted_text = "Текст сообщения недоступен"
                         if stanza_id:
                             delete_id = f"delete_{stanza_id}"
                             if delete_id not in sent_deletes:
-                                # Сначала проверяем кэш
-                                if stanza_id in deleted_messages_cache:
-                                    deleted_text = deleted_messages_cache[stanza_id]
+                                # Ищем текст в кэше
+                                deleted_text = "Текст сообщения недоступен"
+                                if stanza_id in message_cache:
+                                    deleted_text = message_cache[stanza_id]['text']
+                                    print(f"✅ Найден текст в кэше: {deleted_text[:50]}...")
                                 else:
-                                    # Если нет в кэше, ищем в истории
+                                    # Если нет в кэше, пробуем получить свежую историю
+                                    print("🔄 Текст не в кэше, запрашиваю историю...")
                                     history = get_chat_history(50)
-                                    for msg in history:
-                                        if msg.get('idMessage') == stanza_id:
-                                            deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
-                                            # Сохраняем в кэш на будущее
-                                            deleted_messages_cache[stanza_id] = deleted_text
-                                            break
+                                    update_message_cache(history)
+                                    if stanza_id in message_cache:
+                                        deleted_text = message_cache[stanza_id]['text']
+                                        print(f"✅ Найден текст в истории: {deleted_text[:50]}...")
                                 
                                 send_deleted_notification(sender_name, deleted_text, delete_id)
             except Exception as e:
@@ -291,7 +317,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С УДАЛЕНИЕМ)")
+print("🚀 МОСТ MAX → TELEGRAM (ПОЛНАЯ ВЕРСИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -311,14 +337,13 @@ while True:
     try:
         history = get_chat_history(15)
         
+        # Обновляем кэш перед обработкой
         if history and isinstance(history, list):
+            update_message_cache(history)
+            
             for msg in reversed(history):
                 msg_id = msg.get('idMessage')
                 is_edited = msg.get('isEdited', False)
-                
-                # Сохраняем текст в кэш для возможного удаления
-                if msg.get('typeMessage') == 'textMessage' and msg_id:
-                    deleted_messages_cache[msg_id] = msg.get('textMessage', '')
                 
                 if not msg_id:
                     continue
@@ -346,12 +371,20 @@ while True:
                 if time.time() - last_message_time < 0.5:
                     time.sleep(0.5)
                 
-                # 👇 ПУСТАЯ СТРОКА В ОТВЕТАХ
+                # Получаем информацию об ответе (с использованием кэша)
                 reply_info = ""
                 if 'quotedMessage' in msg:
                     quoted = msg['quotedMessage']
+                    quoted_id = quoted.get('stanzaId')
                     quoted_text = quoted.get('textMessage', '')
                     quoted_sender = quoted.get('senderName', '')
+                    
+                    # Если есть quoted_id, пробуем найти в кэше более полную информацию
+                    if quoted_id and quoted_id in message_cache:
+                        cached = message_cache[quoted_id]
+                        quoted_text = cached['text']
+                        quoted_sender = cached['sender']
+                    
                     if quoted_text:
                         if quoted_sender:
                             reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
@@ -384,7 +417,7 @@ while True:
                 if stats['total'] % 10 == 0:
                     print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
         
-        # Очистка старых данных
+        # Очистка старых данных раз в минуту
         if time.time() - last_cleanup > 60:
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
@@ -392,10 +425,10 @@ while True:
                 sent_edits = set(list(sent_edits)[-100:])
             if len(sent_deletes) > 100:
                 sent_deletes = set(list(sent_deletes)[-100:])
-            if len(deleted_messages_cache) > 200:
-                # Оставляем только последние 200 записей в кэше
-                cache_items = list(deleted_messages_cache.items())[-200:]
-                deleted_messages_cache = dict(cache_items)
+            if len(message_cache) > 500:
+                # Оставляем только последние 500 сообщений в кэше
+                cache_items = sorted(message_cache.items(), key=lambda x: x[1]['timestamp'], reverse=True)[:500]
+                message_cache = dict(cache_items)
             last_cleanup = time.time()
         
         time.sleep(1)
