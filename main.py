@@ -65,7 +65,7 @@ def update_message_cache(history):
                     'timestamp': timestamp
                 }
         
-        # Также сохраняем информацию об ответах, если есть
+        # Сохраняем информацию об ответах
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
             quoted_id = quoted.get('stanzaId')
@@ -76,7 +76,7 @@ def update_message_cache(history):
                     message_cache[quoted_id] = {
                         'text': quoted_text,
                         'sender': quoted_sender,
-                        'timestamp': timestamp - 1  # чуть раньше
+                        'timestamp': timestamp - 1
                     }
 
 def send_history_to_telegram(chat_id, count=10):
@@ -84,7 +84,7 @@ def send_history_to_telegram(chat_id, count=10):
     history = get_chat_history(count)
     if not history or len(history) == 0:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
-                     json={"chat_id": chat_id, "text": "📭 Нет сообщений в истории"})
+                     json={"chat_id": chat_id, "text": "📭 Нет сообщений в истории за последние 14 дней"})
         return
     
     messages = []
@@ -96,10 +96,6 @@ def send_history_to_telegram(chat_id, count=10):
             continue
         seen_ids.add(msg_id)
         
-        # Пропускаем служебные сообщения в истории
-        if msg.get('typeMessage') in ['deletedMessage']:
-            continue
-            
         if msg.get('typeMessage') != 'textMessage':
             continue
         
@@ -117,7 +113,7 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
-        # Получаем информацию об ответе
+        # Информация об ответе
         reply_prefix = ""
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
@@ -130,11 +126,12 @@ def send_history_to_telegram(chat_id, count=10):
                     reply_prefix = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
         
         edit_mark = " ✏️" if msg.get('isEdited') else ""
+        delete_mark = " 🗑️" if msg.get('isDeleted') else ""
         
         if len(text) > 100:
             text = text[:100] + '...'
         
-        messages.append(f"{arrow} [{time_str}] {sender}{edit_mark}:\n\n{reply_prefix}{text}")
+        messages.append(f"{arrow} [{time_str}] {sender}{edit_mark}{delete_mark}:\n\n{reply_prefix}{text}")
     
     if not messages:
         requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
@@ -248,58 +245,59 @@ class Handler(BaseHTTPRequestHandler):
                     if stanza_id and new_text:
                         edit_id = f"edit_{stanza_id}"
                         if edit_id not in sent_edits:
-                            # Пытаемся найти информацию об ответе для редактируемого сообщения
+                            # Пытаемся найти информацию об ответе
                             reply_info = ""
                             if stanza_id in message_cache:
-                                # Если есть в кэше, используем
                                 pass
                             else:
-                                # Если нет в кэше, пробуем получить историю
                                 history = get_chat_history(50)
                                 update_message_cache(history)
                             
                             send_text_to_telegram(new_text, sender_name, reply_info, is_edit=True, edit_id=edit_id)
                 
-                # Обработка удаления сообщений
-                elif webhook_type == 'incomingMessageReceived' or webhook_type == 'outgoingMessageReceived':
-                    # Проверяем, не является ли это сообщением об удалении
-                    message_data = update.get('body', {}).get('messageData', {})
-                    if message_data.get('typeMessage') == 'deletedMessage':
-                        print(f"\n🗑️ ПОЛУЧЕНО УВЕДОМЛЕНИЕ ОБ УДАЛЕНИИ!")
-                        
-                        body = update.get('body', {})
-                        sender_data = body.get('senderData', {})
-                        message_data = body.get('messageData', {})
-                        deleted_data = message_data.get('deletedMessageData', {})
-                        
-                        # ID удалённого сообщения
-                        stanza_id = deleted_data.get('stanzaId')
-                        sender_name = sender_data.get('senderName', 'Неизвестно')
-                        
-                        print(f"📎 Удалено сообщение ID: {stanza_id}")
-                        print(f"👤 От: {sender_name}")
-                        
-                        if stanza_id:
-                            delete_id = f"delete_{stanza_id}"
-                            if delete_id not in sent_deletes:
-                                # Ищем текст в кэше
-                                deleted_text = "Текст сообщения недоступен"
+                # Обработка удаления сообщений - исправлено согласно документации [citation:4]
+                elif webhook_type == 'deletedMessageWebhook':
+                    print(f"\n🗑️ ПОЛУЧЕНО УВЕДОМЛЕНИЕ ОБ УДАЛЕНИИ!")
+                    
+                    body = update.get('body', {})
+                    sender_data = body.get('senderData', {})
+                    message_data = body.get('messageData', {})
+                    deleted_data = message_data.get('deletedMessageData', {})
+                    
+                    # ID удалённого сообщения
+                    stanza_id = deleted_data.get('stanzaId')
+                    sender_name = sender_data.get('senderName', 'Неизвестно')
+                    
+                    print(f"📎 Удалено сообщение ID: {stanza_id}")
+                    print(f"👤 От: {sender_name}")
+                    
+                    if stanza_id:
+                        delete_id = f"delete_{stanza_id}"
+                        if delete_id not in sent_deletes:
+                            # Ищем текст в кэше
+                            deleted_text = "Текст сообщения недоступен"
+                            if stanza_id in message_cache:
+                                deleted_text = message_cache[stanza_id]['text']
+                                print(f"✅ Найден текст в кэше: {deleted_text[:50]}...")
+                            else:
+                                # Если нет в кэше, пробуем получить историю
+                                print("🔄 Текст не в кэше, запрашиваю историю...")
+                                history = get_chat_history(50)
+                                update_message_cache(history)
                                 if stanza_id in message_cache:
                                     deleted_text = message_cache[stanza_id]['text']
-                                    print(f"✅ Найден текст в кэше: {deleted_text[:50]}...")
-                                else:
-                                    # Если нет в кэше, пробуем получить свежую историю
-                                    print("🔄 Текст не в кэше, запрашиваю историю...")
-                                    history = get_chat_history(50)
-                                    update_message_cache(history)
-                                    if stanza_id in message_cache:
-                                        deleted_text = message_cache[stanza_id]['text']
-                                        print(f"✅ Найден текст в истории: {deleted_text[:50]}...")
-                                
-                                send_deleted_notification(sender_name, deleted_text, delete_id)
+                                    print(f"✅ Найден текст в истории: {deleted_text[:50]}...")
+                            
+                            send_deleted_notification(sender_name, deleted_text, delete_id)
+                
+                # Сбрасываем остальные типы уведомлений [citation:5]
+                else:
+                    print(f"⏭️ Пропущен тип уведомления: {webhook_type}")
+                    
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
         
+        # Всегда отвечаем 200 OK [citation:5]
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"OK")
@@ -337,7 +335,6 @@ while True:
     try:
         history = get_chat_history(15)
         
-        # Обновляем кэш перед обработкой
         if history and isinstance(history, list):
             update_message_cache(history)
             
@@ -371,7 +368,7 @@ while True:
                 if time.time() - last_message_time < 0.5:
                     time.sleep(0.5)
                 
-                # Получаем информацию об ответе (с использованием кэша)
+                # Получаем информацию об ответе
                 reply_info = ""
                 if 'quotedMessage' in msg:
                     quoted = msg['quotedMessage']
@@ -379,7 +376,6 @@ while True:
                     quoted_text = quoted.get('textMessage', '')
                     quoted_sender = quoted.get('senderName', '')
                     
-                    # Если есть quoted_id, пробуем найти в кэше более полную информацию
                     if quoted_id and quoted_id in message_cache:
                         cached = message_cache[quoted_id]
                         quoted_text = cached['text']
@@ -390,7 +386,6 @@ while True:
                             reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
                         else:
                             reply_info = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
-                        print(f"📎 Найден ответ на: {quoted_text[:30]}...")
                 
                 if msg.get('type') == 'incoming':
                     sender_name = msg.get('senderName', 'Неизвестно')
@@ -426,7 +421,6 @@ while True:
             if len(sent_deletes) > 100:
                 sent_deletes = set(list(sent_deletes)[-100:])
             if len(message_cache) > 500:
-                # Оставляем только последние 500 сообщений в кэше
                 cache_items = sorted(message_cache.items(), key=lambda x: x[1]['timestamp'], reverse=True)[:500]
                 message_cache = dict(cache_items)
             last_cleanup = time.time()
