@@ -21,8 +21,8 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
     raise ValueError(f"❌ Отсутствуют: {', '.join(missing)}")
 
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
-processed_ids = set()  # обычные сообщения
-edited_ids = set()     # отдельное хранилище для редактированных
+processed_ids = set()
+sent_edits = set()  # отдельно храним отправленные редактирования
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -75,7 +75,6 @@ def send_history_to_telegram(chat_id, count=10):
             sender = "@scul_k"
             arrow = '📤'
         
-        # Отображаем имя отвечаемого
         reply_prefix = ""
         if 'quotedMessage' in msg:
             quoted = msg['quotedMessage']
@@ -87,7 +86,6 @@ def send_history_to_telegram(chat_id, count=10):
                 else:
                     reply_prefix = f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
         
-        # Пометка о редактировании
         edit_mark = " ✏️" if msg.get('isEdited') else ""
         
         if len(text) > 100:
@@ -107,10 +105,15 @@ def send_history_to_telegram(chat_id, count=10):
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
                  json={"chat_id": chat_id, "text": full_text})
 
-def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False):
+def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_id=None):
     """Отправляет текстовое сообщение в Telegram"""
+    # Проверяем, не отправляли ли уже это редактирование
+    if is_edit and edit_id and edit_id in sent_edits:
+        print(f"⏭️ Редактирование {edit_id} уже отправлено, пропускаем")
+        return False
+    
     if is_edit:
-        full_message = f"✏️ **MAX от {sender_name} отредактировал сообщение:**\n{text}"
+        full_message = f"✏️ {sender_name} отредактировал сообщение:\n{text}"
     elif reply_info:
         full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
     else:
@@ -119,22 +122,13 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False):
     try:
         response = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                                 json={"chat_id": TELEGRAM_CHAT_ID, "text": full_message}, timeout=10)
-        return response.status_code == 200
+        if response.status_code == 200:
+            if is_edit and edit_id:
+                sent_edits.add(edit_id)
+            return True
+        return False
     except:
         return False
-
-# ===== ОБРАБОТКА РЕДАКТИРОВАНИЯ =====
-def handle_edited_message(stanza_id, new_text, sender_name):
-    """Отправляет уведомление о редактировании сообщения в Telegram"""
-    # Проверяем, не отправляли ли уже это редактирование
-    edit_key = f"edit_{stanza_id}"
-    if edit_key in edited_ids:
-        print(f"⏭️ Редактирование уже обработано, пропускаем")
-        return
-    
-    send_text_to_telegram(new_text, sender_name, is_edit=True)
-    edited_ids.add(edit_key)
-    print(f"✅ Уведомление о редактировании отправлено")
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -186,7 +180,10 @@ class Handler(BaseHTTPRequestHandler):
                     print(f"📝 Новый текст: {new_text[:50]}...")
                     
                     if stanza_id and new_text:
-                        handle_edited_message(stanza_id, new_text, sender_name)
+                        # Отправляем с проверкой на дубли
+                        edit_id = f"edit_{stanza_id}"
+                        if edit_id not in sent_edits:
+                            send_text_to_telegram(new_text, sender_name, is_edit=True, edit_id=edit_id)
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
         
@@ -227,7 +224,6 @@ while True:
         history = get_chat_history(15)
         
         if history and isinstance(history, list):
-            # Проходим с конца (новые сообщения)
             for msg in reversed(history):
                 msg_id = msg.get('idMessage')
                 is_edited = msg.get('isEdited', False)
@@ -235,18 +231,24 @@ while True:
                 if not msg_id:
                     continue
                 
-                # Пропускаем если уже обработано (с учётом редактирования)
+                # Пропускаем обычные сообщения, если уже обработаны
                 if msg_id in processed_ids and not is_edited:
                     continue
+                
+                # Для отредактированных проверяем отдельно
+                if is_edited:
+                    edit_key = f"edit_{msg_id}"
+                    if edit_key in sent_edits:
+                        continue
                 
                 if msg.get('typeMessage') != 'textMessage':
                     if not is_edited:
                         processed_ids.add(msg_id)
                     continue
                 
-                # Проверяем возраст только для новых сообщений
                 timestamp = msg.get('timestamp', 0)
-                if time.time() - timestamp > 30 and not is_edited:
+                text = msg.get('textMessage', '')
+                if not text:
                     if not is_edited:
                         processed_ids.add(msg_id)
                     continue
@@ -254,12 +256,6 @@ while True:
                 # Защита от слишком частых отправок
                 if time.time() - last_message_time < 0.5:
                     time.sleep(0.5)
-                
-                text = msg.get('textMessage', '')
-                if not text:
-                    if not is_edited:
-                        processed_ids.add(msg_id)
-                    continue
                 
                 # Получаем информацию об ответе
                 reply_info = ""
@@ -279,12 +275,22 @@ while True:
                     sender_name = "@scul_k"
                 
                 stats['total'] += 1
-                if send_text_to_telegram(text, sender_name, reply_info, is_edit=is_edited):
-                    stats['sent'] += 1
-                    processed_ids.add(msg_id)
-                    last_message_time = time.time()
+                
+                # Для отредактированных используем edit_id
+                if is_edited:
+                    edit_id = f"edit_{msg_id}"
+                    if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_id):
+                        stats['sent'] += 1
+                        last_message_time = time.time()
+                    else:
+                        stats['skipped'] += 1
                 else:
-                    stats['skipped'] += 1
+                    if send_text_to_telegram(text, sender_name, reply_info):
+                        stats['sent'] += 1
+                        processed_ids.add(msg_id)
+                        last_message_time = time.time()
+                    else:
+                        stats['skipped'] += 1
                 
                 if stats['total'] % 10 == 0:
                     print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
@@ -293,8 +299,8 @@ while True:
         if time.time() - last_cleanup > 60:
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
-            if len(edited_ids) > 100:
-                edited_ids = set(list(edited_ids)[-100:])
+            if len(sent_edits) > 100:
+                sent_edits = set(list(sent_edits)[-100:])
             last_cleanup = time.time()
         
         time.sleep(1)
