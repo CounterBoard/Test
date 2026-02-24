@@ -79,7 +79,7 @@ def send_history_to_telegram(chat_id, count=10):
         
         messages.append(f"{arrow} [{time_str}] {sender}:\n{text}")
     
-    full_text = f"📜 **История чата (последние {len(messages)}):**\n\n" + "\n\n".join(messages)
+    full_text = f"📜 История чата (последние {len(messages)}):\n\n" + "\n\n".join(messages)
     
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "...\n\n(сообщение обрезано)"
@@ -87,28 +87,26 @@ def send_history_to_telegram(chat_id, count=10):
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": chat_id,
-        "text": full_text,
-        "parse_mode": "Markdown"
+        "text": full_text
     }
     requests.post(tg_url, json=data)
     print(f"✅ История из {count} сообщений отправлена")
 
 def send_text_to_telegram(text, sender_name):
-    """Отправляет текстовое сообщение в Telegram в нужном формате"""
-    full_message = f"📨 **MAX от {sender_name}:**\n{text}"
+    """Отправляет текстовое сообщение в Telegram без Markdown"""
+    full_message = f"📨 MAX от {sender_name}:\n{text}"
     
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     tg_data = {
         "chat_id": TELEGRAM_CHAT_ID,
-        "text": full_message,
-        "parse_mode": "Markdown"
+        "text": full_message
     }
     try:
         response = requests.post(tg_url, json=tg_data, timeout=10)
         if response.status_code == 200:
             return True
         else:
-            print(f"❌ Ошибка Telegram: {response.status_code}")
+            print(f"❌ Ошибка Telegram: {response.status_code} - {response.text}")
             return False
     except Exception as e:
         print(f"❌ Ошибка отправки: {e}")
@@ -156,7 +154,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
         
-        # Всегда отвечаем 200 OK
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
         self.end_headers()
