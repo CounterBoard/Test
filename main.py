@@ -32,25 +32,43 @@ def get_chat_history(count=10):
         "chatId": MAX_CHAT_ID,
         "count": min(count, 100)
     }
+    print(f"🔍 Запрос истории: {count} сообщений")
     try:
         response = requests.post(url, json=payload, timeout=10)
+        print(f"📊 Статус ответа: {response.status_code}")
         if response.status_code == 200:
-            return response.json()
+            data = response.json()
+            print(f"✅ Получено сообщений: {len(data)}")
+            return data
         else:
             print(f"❌ Ошибка получения истории: {response.status_code}")
+            print(f"📝 Текст ошибки: {response.text}")
             return None
     except Exception as e:
-        print(f"❌ Ошибка получения истории: {e}")
+        print(f"❌ Ошибка при запросе истории: {e}")
         return None
 
 def send_history_to_telegram(chat_id, count=10):
     """Отправляет историю сообщений в Telegram"""
     print(f"\n🔍 ВЫЗВАНА КОМАНДА /h с параметром {count}")
+    print(f"👥 Чат ID для отправки: {chat_id}")
     
     history = get_chat_history(count)
     
-    if not history or len(history) == 0:
-        print("⏭️ История пуста")
+    print(f"📦 Получена история: {history}")
+    
+    if not history:
+        print("❌ history = None")
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {
+            "chat_id": chat_id,
+            "text": "❌ Ошибка получения истории от GREEN-API"
+        }
+        requests.post(tg_url, json=data)
+        return
+        
+    if len(history) == 0:
+        print("⏭️ История пуста (len=0)")
         tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         data = {
             "chat_id": chat_id,
@@ -84,13 +102,23 @@ def send_history_to_telegram(chat_id, count=10):
     if len(full_text) > 4000:
         full_text = full_text[:4000] + "...\n\n(сообщение обрезано)"
     
+    print(f"📤 Отправка истории в Telegram, длина: {len(full_text)} символов")
+    
     tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     data = {
         "chat_id": chat_id,
         "text": full_text
     }
-    requests.post(tg_url, json=data)
-    print(f"✅ История из {count} сообщений отправлена")
+    
+    try:
+        response = requests.post(tg_url, json=data, timeout=10)
+        print(f"📊 Ответ Telegram: {response.status_code}")
+        if response.status_code == 200:
+            print("✅ История успешно отправлена")
+        else:
+            print(f"❌ Ошибка Telegram: {response.text}")
+    except Exception as e:
+        print(f"❌ Ошибка при отправке: {e}")
 
 def send_text_to_telegram(text, sender_name):
     """Отправляет текстовое сообщение в Telegram без Markdown"""
@@ -151,8 +179,14 @@ class Handler(BaseHTTPRequestHandler):
                             
                             print(f"✅ Получена команда /h с параметром {count}")
                             send_history_to_telegram(chat_id, count)
+                    else:
+                        print("❌ Чат не совпадает")
+                else:
+                    print("❌ В сообщении нет текста")
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
+        else:
+            print("❌ Пустой POST запрос")
         
         self.send_response(200)
         self.send_header('Content-type', 'text/plain')
@@ -172,7 +206,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ОТЛАДКОЙ ИСТОРИИ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
