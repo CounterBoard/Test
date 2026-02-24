@@ -71,7 +71,7 @@ def send_history_to_telegram(chat_id, count=10):
             sender = msg.get('senderName', 'Неизвестно')
             arrow = '📥'
         else:
-            sender = "ымел осла"
+            sender = "@scul_k"
             arrow = '📤'
         
         if len(text) > 100:
@@ -92,6 +92,27 @@ def send_history_to_telegram(chat_id, count=10):
     }
     requests.post(tg_url, json=data)
     print(f"✅ История из {count} сообщений отправлена")
+
+def send_text_to_telegram(text, sender_name):
+    """Отправляет текстовое сообщение в Telegram в нужном формате"""
+    full_message = f"📨 **MAX от {sender_name}:**\n{text}"
+    
+    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    tg_data = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": full_message,
+        "parse_mode": "Markdown"
+    }
+    try:
+        response = requests.post(tg_url, json=tg_data, timeout=10)
+        if response.status_code == 200:
+            return True
+        else:
+            print(f"❌ Ошибка Telegram: {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"❌ Ошибка отправки: {e}")
+        return False
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -153,29 +174,8 @@ web_thread = threading.Thread(target=run_http_server, daemon=True)
 web_thread.start()
 # =====================
 
-def send_text_to_telegram(text, sender_name):
-    """Отправляет текстовое сообщение в Telegram"""
-    full_message = f"📨 **MAX от {sender_name}:**\n \n{text}"
-    
-    tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    tg_data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": full_message,
-        "parse_mode": "Markdown"
-    }
-    try:
-        response = requests.post(tg_url, json=tg_data, timeout=10)
-        if response.status_code == 200:
-            return True
-        else:
-            print(f"❌ Ошибка Telegram: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"❌ Ошибка отправки: {e}")
-        return False
-
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ИСПРАВЛЕННАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -183,7 +183,8 @@ print(f"📬 Чат Telegram: {TELEGRAM_CHAT_ID}")
 print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("📝 Команда /h - последние 10 сообщений")
-print("📊 Статистика каждые 10 сообщений\n")
+print("📊 Статистика каждые 10 сообщений")
+print("👤 Твои сообщения: @scul_k\n")
 
 while True:
     try:
@@ -200,7 +201,7 @@ while True:
                 if msg.get('type') == 'incoming':
                     sender_name = msg.get('senderName', 'Неизвестно')
                 else:
-                    sender_name = "ымел осла"
+                    sender_name = "@scul_k"
                 
                 if msg.get('typeMessage') == 'textMessage':
                     text = msg.get('textMessage', '')
