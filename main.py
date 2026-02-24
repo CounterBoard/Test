@@ -23,6 +23,7 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 # ===== ХРАНИЛИЩЕ ОБРАБОТАННЫХ СООБЩЕНИЙ =====
 processed_ids = set()
 sent_edits = set()
+sent_deletes = set()  # для отслеживания отправленных уведомлений об удалении
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -58,6 +59,10 @@ def send_history_to_telegram(chat_id, count=10):
             continue
         seen_ids.add(msg_id)
         
+        # Пропускаем служебные сообщения в истории
+        if msg.get('typeMessage') in ['deletedMessage']:
+            continue
+            
         if msg.get('typeMessage') != 'textMessage':
             continue
         
@@ -113,11 +118,11 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_
         return False
     
     if is_edit:
-        # Для редактирования показываем, что это ответ, если он был
+        # 👇 ДОБАВЛЕНА ПУСТАЯ СТРОКА ПОСЛЕ ЗАГОЛОВКА
         if reply_info:
-            full_message = f"{reply_info}✏️ {sender_name} отредактировал сообщение:\n{text}"
+            full_message = f"{reply_info}✏️ {sender_name} отредактировал сообщение:\n\n{text}"
         else:
-            full_message = f"✏️ {sender_name} отредактировал сообщение:\n{text}"
+            full_message = f"✏️ {sender_name} отредактировал сообщение:\n\n{text}"
     elif reply_info:
         full_message = f"{reply_info}📨 MAX от {sender_name}:\n{text}"
     else:
@@ -132,6 +137,29 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_
             return True
         return False
     except:
+        return False
+
+# ===== НОВАЯ ФУНКЦИЯ ДЛЯ ОБРАБОТКИ УДАЛЕНИЯ =====
+def send_deleted_notification(sender_name, deleted_text, delete_id):
+    """Отправляет уведомление об удалении сообщения в Telegram"""
+    # Проверяем, не отправляли ли уже это уведомление
+    if delete_id and delete_id in sent_deletes:
+        print(f"⏭️ Уведомление об удалении {delete_id} уже отправлено")
+        return False
+    
+    full_message = f"🗑️ {sender_name} удалил сообщение:\n\n{deleted_text}"
+    
+    try:
+        response = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                                json={"chat_id": TELEGRAM_CHAT_ID, "text": full_message}, timeout=10)
+        if response.status_code == 200:
+            if delete_id:
+                sent_deletes.add(delete_id)
+            print(f"✅ Уведомление об удалении отправлено")
+            return True
+        return False
+    except Exception as e:
+        print(f"❌ Ошибка при отправке уведомления об удалении: {e}")
         return False
 
 # ===== ВЕБ-СЕРВЕР =====
@@ -186,8 +214,41 @@ class Handler(BaseHTTPRequestHandler):
                     if stanza_id and new_text:
                         edit_id = f"edit_{stanza_id}"
                         if edit_id not in sent_edits:
-                            # Для вебхуков информация об ответе не приходит, поэтому отправляем без reply_info
                             send_text_to_telegram(new_text, sender_name, is_edit=True, edit_id=edit_id)
+                
+                # 👇 НОВОЕ: Обработка удаления сообщений
+                elif webhook_type in ['incomingMessageReceived', 'outgoingMessageReceived']:
+                    # Проверяем, не является ли это сообщением об удалении
+                    message_data = update.get('body', {}).get('messageData', {})
+                    if message_data.get('typeMessage') == 'deletedMessage':
+                        print(f"\n🗑️ ПОЛУЧЕНО УВЕДОМЛЕНИЕ ОБ УДАЛЕНИИ!")
+                        
+                        body = update.get('body', {})
+                        sender_data = body.get('senderData', {})
+                        message_data = body.get('messageData', {})
+                        deleted_data = message_data.get('deletedMessageData', {})
+                        
+                        # ID удалённого сообщения
+                        stanza_id = deleted_data.get('stanzaId')
+                        sender_name = sender_data.get('senderName', 'Неизвестно')
+                        
+                        print(f"📎 Удалено сообщение ID: {stanza_id}")
+                        print(f"👤 От: {sender_name}")
+                        
+                        # Пытаемся найти текст удалённого сообщения в истории
+                        deleted_text = "Текст сообщения недоступен"
+                        if stanza_id:
+                            # Проверяем, не отправляли ли уже это уведомление
+                            delete_id = f"delete_{stanza_id}"
+                            if delete_id not in sent_deletes:
+                                # Временно получаем историю, чтобы найти текст удалённого сообщения
+                                history = get_chat_history(50)
+                                for msg in history:
+                                    if msg.get('idMessage') == stanza_id:
+                                        deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
+                                        break
+                                
+                                send_deleted_notification(sender_name, deleted_text, delete_id)
             except Exception as e:
                 print(f"❌ Ошибка обработки: {e}")
         
@@ -208,7 +269,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ОТВЕТАМИ В РЕДАКТИРОВАНИЯХ)")
+print("🚀 МОСТ MAX → TELEGRAM (С УДАЛЕНИЕМ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -217,7 +278,8 @@ print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("📝 Команда /h - последние 10 сообщений")
 print("👤 Твои сообщения: @scul_k")
-print("✏️ Редактирование с ответами поддерживается")
+print("✏️ Редактирование поддерживается")
+print("🗑️ Удаление поддерживается")
 print("💬 Цитирование поддерживается\n")
 
 last_cleanup = time.time()
@@ -258,7 +320,7 @@ while True:
                 if time.time() - last_message_time < 0.5:
                     time.sleep(0.5)
                 
-                # 👇 ПОЛУЧАЕМ ИНФОРМАЦИЮ ОБ ОТВЕТЕ (ЦИТИРОВАНИИ)
+                # Получаем информацию об ответе (цитировании)
                 reply_info = ""
                 if 'quotedMessage' in msg:
                     quoted = msg['quotedMessage']
@@ -302,6 +364,8 @@ while True:
                 processed_ids = set(list(processed_ids)[-500:])
             if len(sent_edits) > 100:
                 sent_edits = set(list(sent_edits)[-100:])
+            if len(sent_deletes) > 100:
+                sent_deletes = set(list(sent_deletes)[-100:])
             last_cleanup = time.time()
         
         time.sleep(1)
