@@ -20,7 +20,7 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
                if not os.environ.get(v)]
     raise ValueError(f"❌ Отсутствуют: {', '.join(missing)}")
 
-# ===== ХРАНИЛИЩЕ =====
+# ===== ХРАНИЛИЩА =====
 processed_ids = set()        # обработанные сообщения
 sent_edits = set()           # отправленные редактирования
 sent_deletes = set()         # отправленные удаления
@@ -40,7 +40,8 @@ def get_chat_history(count=10):
         if response.status_code == 200:
             return response.json()
         return []
-    except:
+    except Exception as e:
+        print(f"Ошибка получения истории: {e}")
         return []
 
 def update_message_cache(history):
@@ -128,14 +129,9 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_
         return False
     
     if is_edit:
-        if reply_info:
-            full_message = f"{reply_info}✏️ {sender_name} отредактировал сообщение:\n\n{text}"
-        else:
-            full_message = f"✏️ {sender_name} отредактировал сообщение:\n\n{text}"
-    elif reply_info:
-        full_message = f"{reply_info}📨 MAX от {sender_name}:\n\n{text}"
+        full_message = f"{reply_info}✏️ {sender_name} отредактировал сообщение:\n\n{text}"
     else:
-        full_message = f"📨 MAX от {sender_name}:\n\n{text}"
+        full_message = f"{reply_info}📨 MAX от {sender_name}:\n\n{text}"
     
     try:
         response = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
@@ -145,7 +141,81 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_
                 sent_edits.add(edit_id)
             return True
         return False
-    except:
+    except Exception as e:
+        print(f"Ошибка отправки текста: {e}")
+        return False
+
+def send_media_to_telegram(file_url, sender_name, caption, msg_type, file_name, reply_info=""):
+    """Скачивает файл из MAX и отправляет его в Telegram"""
+    try:
+        # Скачиваем файл
+        file_response = requests.get(file_url, timeout=30)
+        if file_response.status_code != 200:
+            print(f"Ошибка скачивания файла: {file_response.status_code}")
+            return False
+        
+        file_content = file_response.content
+        file_size = len(file_content)
+        
+        # Проверка лимита Telegram (50 MB)
+        if file_size > 50 * 1024 * 1024:
+            error_text = f"⚠️ {sender_name} отправил файл ({file_name}), но он слишком большой для Telegram (>50 MB)."
+            requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                         json={"chat_id": TELEGRAM_CHAT_ID, "text": error_text})
+            return False
+        
+        # Определяем метод отправки
+        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/"
+        files = None
+        data = {"chat_id": TELEGRAM_CHAT_ID}
+        
+        if msg_type == 'imageMessage':
+            tg_url += "sendPhoto"
+            files = {'photo': (file_name, file_content)}
+        else:
+            tg_url += "sendDocument"
+            files = {'document': (file_name, file_content)}
+        
+        # Формируем подпись
+        full_caption = f"{reply_info}📨 MAX от {sender_name}"
+        if caption:
+            full_caption += f"\n{caption}"
+        if msg_type == 'videoMessage':
+            full_caption = f"🎥 {full_caption}"
+        elif msg_type == 'audioMessage':
+            full_caption = f"🎵 {full_caption}"
+        elif msg_type == 'documentMessage':
+            full_caption = f"📄 {full_caption}"
+        
+        data['caption'] = full_caption[:1024]  # Ограничение Telegram на длину подписи
+        
+        response = requests.post(tg_url, data=data, files=files, timeout=30)
+        return response.status_code == 200
+        
+    except Exception as e:
+        print(f"Ошибка отправки медиа: {e}")
+        return False
+
+def send_extended_text_to_telegram(extended_data, sender_name, reply_info=""):
+    """Отправляет расширенное текстовое сообщение (например, со ссылкой)"""
+    text = extended_data.get('text', '')
+    title = extended_data.get('title', '')
+    description = extended_data.get('description', '')
+    
+    full_message = f"{reply_info}📨 MAX от {sender_name}:"
+    if text:
+        full_message += f"\n\n{text}"
+    if title:
+        full_message += f"\n\n🔗 **{title}**"
+    if description:
+        full_message += f"\n{description}"
+    
+    try:
+        response = requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+                                json={"chat_id": TELEGRAM_CHAT_ID, "text": full_message}, timeout=10)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Ошибка отправки extendedText: {e}")
         return False
 
 def send_deleted_notification(sender_name, deleted_text, delete_id):
@@ -164,8 +234,16 @@ def send_deleted_notification(sender_name, deleted_text, delete_id):
             print(f"✅ Уведомление об удалении отправлено")
             return True
         return False
-    except:
+    except Exception as e:
+        print(f"Ошибка отправки уведомления об удалении: {e}")
         return False
+
+def get_sender_name(msg):
+    """Унифицированное получение имени отправителя"""
+    if msg.get('type') == 'incoming':
+        return msg.get('senderName', 'Неизвестно')
+    else:
+        return "@scul_k"
 
 # ===== ВЕБ-СЕРВЕР =====
 class Handler(BaseHTTPRequestHandler):
@@ -202,7 +280,7 @@ class Handler(BaseHTTPRequestHandler):
                 message_data = body.get('messageData', {})
                 webhook_type = update.get('typeWebhook')
                 
-                # 👇 ОБРАБОТКА УДАЛЕНИЯ
+                # ОБРАБОТКА УДАЛЕНИЯ
                 if message_data.get('typeMessage') == 'deletedMessage':
                     print(f"\n🗑️ ПОЛУЧЕНО УВЕДОМЛЕНИЕ ОБ УДАЛЕНИИ в {webhook_type}")
                     
@@ -216,7 +294,7 @@ class Handler(BaseHTTPRequestHandler):
                         deleted_text = message_cache.get(stanza_id, "Текст сообщения недоступен")
                         send_deleted_notification(sender_name, deleted_text, stanza_id)
                 
-                # 👇 ОБРАБОТКА РЕДАКТИРОВАНИЯ
+                # ОБРАБОТКА РЕДАКТИРОВАНИЯ
                 elif webhook_type == 'editedMessageWebhook':
                     print(f"\n✏️ ПОЛУЧЕНО РЕДАКТИРОВАНИЕ")
                     
@@ -228,7 +306,7 @@ class Handler(BaseHTTPRequestHandler):
                     if stanza_id and new_text:
                         edit_id = f"edit_{stanza_id}"
                         if edit_id not in sent_edits:
-                            # Ищем информацию об ответе для редактируемого сообщения
+                            # Ищем информацию об ответе
                             reply_info = ""
                             history = get_chat_history(20)
                             for msg in history:
@@ -266,7 +344,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ПОЛНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (ПОЛНАЯ ВЕРСИЯ С МЕДИА)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -275,6 +353,7 @@ print("=" * 50)
 print("🟢 Запущено. Опрос истории каждую секунду...")
 print("📝 Команда /h - последние 10 сообщений")
 print("👤 Твои сообщения: @scul_k")
+print("🖼️ Медиа (фото/видео/файлы) поддерживаются")
 print("✏️ Редактирование поддерживается")
 print("🗑️ Удаление поддерживается")
 print("💬 Цитирование поддерживается\n")
@@ -296,15 +375,11 @@ while True:
                     if msg_id not in sent_deletes:
                         print(f"\n🔍 Найдено удалённое сообщение в истории: {msg_id}")
                         
-                        if msg.get('type') == 'incoming':
-                            sender_name = msg.get('senderName', 'Неизвестно')
-                        else:
-                            sender_name = "@scul_k"
-                        
+                        sender_name = get_sender_name(msg)
                         deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
                         send_deleted_notification(sender_name, deleted_text, msg_id)
             
-            # 👇 ОБРАБОТКА СООБЩЕНИЙ (сначала редактирования, потом новые)
+            # 👇 ОБРАБОТКА СООБЩЕНИЙ ИЗ ИСТОРИИ
             for msg in reversed(history):
                 msg_id = msg.get('idMessage')
                 is_edited = msg.get('isEdited', False)
@@ -312,64 +387,17 @@ while True:
                 if not msg_id:
                     continue
                 
-                # 🎯 ПРИОРИТЕТ 1: Отредактированные сообщения
+                # ПРОПУСК УЖЕ ОБРАБОТАННЫХ (с учётом редактирований)
+                if msg_id in processed_ids and not is_edited:
+                    continue
                 if is_edited:
                     edit_key = f"edit_{msg_id}"
                     if edit_key in sent_edits:
                         continue
-                        
-                    if msg.get('typeMessage') != 'textMessage':
-                        continue
-                        
-                    text = msg.get('textMessage', '')
-                    if not text:
-                        continue
-                        
-                    print(f"\n✏️ НАЙДЕНО ОТРЕДАКТИРОВАННОЕ СООБЩЕНИЕ В ИСТОРИИ!")
-                    print(f"   ID: {msg_id}")
-                    print(f"   Текст: {text[:50]}...")
-                    
-                    # Получаем информацию об ответе
-                    reply_info = ""
-                    if 'quotedMessage' in msg:
-                        quoted = msg['quotedMessage']
-                        quoted_text = quoted.get('textMessage', '')
-                        quoted_sender = quoted.get('senderName', '')
-                        if quoted_text:
-                            if quoted_sender:
-                                reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
-                            else:
-                                reply_info = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
-                    
-                    if msg.get('type') == 'incoming':
-                        sender_name = msg.get('senderName', 'Неизвестно')
-                    else:
-                        sender_name = "@scul_k"
-                    
-                    if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_key):
-                        sent_edits.add(edit_key)
-                        stats['sent'] += 1
-                        print(f"✅ Отредактированное сообщение отправлено")
-                    else:
-                        stats['skipped'] += 1
-                    
-                    continue  # переходим к следующему сообщению
                 
-                # 🎯 ПРИОРИТЕТ 2: Обычные сообщения (уже обработанные пропускаем)
-                if msg_id in processed_ids:
-                    continue
-                
-                if msg.get('typeMessage') != 'textMessage' or msg.get('isDeleted'):
-                    processed_ids.add(msg_id)
-                    continue
-                
-                text = msg.get('textMessage', '')
-                if not text:
-                    processed_ids.add(msg_id)
-                    continue
-                
-                if time.time() - last_message_time < 0.5:
-                    time.sleep(0.5)
+                # ПОЛУЧАЕМ ОБЩУЮ ИНФОРМАЦИЮ
+                msg_type = msg.get('typeMessage')
+                sender_name = get_sender_name(msg)
                 
                 # Получаем информацию об ответе
                 reply_info = ""
@@ -383,20 +411,49 @@ while True:
                         else:
                             reply_info = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
                 
-                if msg.get('type') == 'incoming':
-                    sender_name = msg.get('senderName', 'Неизвестно')
+                # 🎯 ОБРАБОТКА ПО ТИПУ СООБЩЕНИЯ
+                sent = False
+                
+                # 1. Текстовые сообщения (обычные и расширенные)
+                if msg_type == 'textMessage':
+                    text = msg.get('textMessage', '')
+                    if text:
+                        sent = send_text_to_telegram(text, sender_name, reply_info, is_edit=is_edited, 
+                                                    edit_id=f"edit_{msg_id}" if is_edited else None)
+                
+                elif msg_type == 'extendedTextMessage':
+                    extended_data = msg.get('extendedTextMessageData', {})
+                    if extended_data:
+                        sent = send_extended_text_to_telegram(extended_data, sender_name, reply_info)
+                
+                # 2. Медиа-сообщения
+                elif msg_type in ['imageMessage', 'videoMessage', 'documentMessage', 'audioMessage']:
+                    file_data = msg.get('fileMessageData', {})
+                    download_url = file_data.get('downloadUrl')
+                    caption = file_data.get('caption', '')
+                    file_name = file_data.get('fileName', 'file')
+                    
+                    if download_url:
+                        sent = send_media_to_telegram(download_url, sender_name, caption, msg_type, file_name, reply_info)
+                
+                # 3. Пропуск остальных типов (стикеры, контакты и т.д.)
                 else:
-                    sender_name = "@scul_k"
+                    if not is_edited:
+                        processed_ids.add(msg_id)
+                    continue
                 
-                stats['total'] += 1
-                
-                if send_text_to_telegram(text, sender_name, reply_info):
-                    processed_ids.add(msg_id)
+                # ОБНОВЛЯЕМ СТАТИСТИКУ И ХРАНИЛИЩА
+                if sent:
                     stats['sent'] += 1
+                    if is_edited:
+                        sent_edits.add(f"edit_{msg_id}")
+                    else:
+                        processed_ids.add(msg_id)
                     last_message_time = time.time()
                 else:
                     stats['skipped'] += 1
                 
+                stats['total'] += 1
                 if stats['total'] % 10 == 0:
                     print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
         
