@@ -102,11 +102,6 @@ def get_sender_name(msg):
     else:
         return "@scul_k"
 
-def determine_gender(name):
-    if name and name[-1] in ['а', 'я', 'А', 'Я']:
-        return "женский"
-    return "мужской"
-
 def get_quoted_text(msg):
     """Извлекает текст цитируемого сообщения"""
     if 'quotedMessage' in msg:
@@ -161,7 +156,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ДИАГНОСТИЧЕСКАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (СТАРЫЕ УДАЛЕНИЯ/РЕДАКТИРОВАНИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -179,54 +174,53 @@ while True:
             
             for msg in history:
                 msg_id = msg.get('idMessage')
-                if not msg_id or msg_id in processed_ids:
+                if not msg_id:
                     continue
                 
-                # ===== ДИАГНОСТИКА =====
-                if msg.get('isEdited') or msg.get('isDeleted'):
-                    print(f"\n🔍 НАЙДЕНО ОСОБОЕ СООБЩЕНИЕ!")
-                    print(f"   ID: {msg_id}")
-                    print(f"   Тип: {msg.get('typeMessage')}")
-                    print(f"   isEdited: {msg.get('isEdited')}")
-                    print(f"   isDeleted: {msg.get('isDeleted')}")
-                    print(f"   Данные: {json.dumps(msg, indent=2, ensure_ascii=False)}")
-                    print("=" * 50)
+                # ===== СТАРЫЕ РАБОЧИЕ БЛОКИ В НАЧАЛЕ =====
                 
-                # Пропускаем очень старые
-                if time.time() - msg.get('timestamp', 0) > 60:
-                    processed_ids.add(msg_id)
-                    continue
-                
-                msg_type = msg.get('typeMessage')
-                sender = get_sender_name(msg)
-                gender = determine_gender(sender)
-                quoted = get_quoted_text(msg)
-                
-                # УДАЛЕНИЯ
+                # УДАЛЕНИЯ (как в старом рабочем коде)
                 if msg.get('isDeleted'):
                     if msg_id not in sent_deletes:
                         deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
-                        action = "удалила" if gender == "женский" else "удалил"
-                        full_text = f"{quoted}🗑️ {sender} {action} сообщение:\n\n{deleted_text}"
+                        quoted = get_quoted_text(msg)
+                        sender = get_sender_name(msg)
+                        full_text = f"{quoted}🗑️ {sender} удалил сообщение:\n\n{deleted_text}"
                         if send_telegram(full_text):
                             sent_deletes.add(msg_id)
                             processed_ids.add(msg_id)
                             print(f"🗑️ Удаление от {sender}")
                     continue
                 
-                # РЕДАКТИРОВАНИЯ
+                # РЕДАКТИРОВАНИЯ (как в старом рабочем коде)
                 if msg.get('isEdited'):
                     edit_key = f"edit_{msg_id}"
                     if edit_key not in sent_edits:
                         text = msg.get('textMessage', '')
                         if text:
-                            action = "отредактировала" if gender == "женский" else "отредактировал"
-                            full_text = f"{quoted}✏️ {sender} {action} сообщение:\n\n{text}"
+                            quoted = get_quoted_text(msg)
+                            sender = get_sender_name(msg)
+                            full_text = f"{quoted}✏️ {sender} отредактировал сообщение:\n\n{text}"
                             if send_telegram(full_text):
                                 sent_edits.add(edit_key)
                                 processed_ids.add(msg_id)
                                 print(f"✏️ Редактирование от {sender}")
                     continue
+                
+                # ===== ДАЛЬШЕ ВСЁ ОСТАЛЬНОЕ =====
+                
+                # Пропускаем уже обработанные
+                if msg_id in processed_ids:
+                    continue
+                
+                # Пропускаем старые сообщения
+                if time.time() - msg.get('timestamp', 0) > 60:
+                    processed_ids.add(msg_id)
+                    continue
+                
+                msg_type = msg.get('typeMessage')
+                sender = get_sender_name(msg)
+                quoted = get_quoted_text(msg)
                 
                 # ТЕКСТ
                 if msg_type == 'textMessage':
@@ -238,29 +232,21 @@ while True:
                             stats['sent'] += 1
                             print(f"📨 Текст от {sender}")
                 
-                # ССЫЛКИ (исправленная версия)
+                # ССЫЛКИ
                 elif msg_type == 'extendedTextMessage':
                     ext = msg.get('extendedTextMessageData', {})
                     text = ext.get('text', '')
                     title = ext.get('title', '')
                     desc = ext.get('description', '')
                     
-                    # Формируем сообщение
                     full_text = f"{quoted}📨 MAX от {sender}:"
-                    
-                    # Добавляем текст ссылки, если есть
                     if text:
                         full_text += f"\n\n{text}"
-                    
-                    # Добавляем заголовок, если есть
                     if title:
                         full_text += f"\n\n🔗 {title}"
-                    
-                    # Добавляем описание, если есть
                     if desc:
                         full_text += f"\n{desc}"
                     
-                    # Отправляем
                     if send_telegram(full_text):
                         processed_ids.add(msg_id)
                         stats['sent'] += 1
