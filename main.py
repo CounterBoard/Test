@@ -16,12 +16,8 @@ TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
 # Проверка наличия переменных
 if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
-    missing = []
-    if not ID_INSTANCE: missing.append('ID_INSTANCE')
-    if not API_TOKEN: missing.append('API_TOKEN')
-    if not MAX_CHAT_ID: missing.append('MAX_CHAT_ID')
-    if not TELEGRAM_BOT_TOKEN: missing.append('TELEGRAM_BOT_TOKEN')
-    if not TELEGRAM_CHAT_ID: missing.append('TELEGRAM_CHAT_ID')
+    missing = [v for v in ['ID_INSTANCE', 'API_TOKEN', 'MAX_CHAT_ID', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'] 
+               if not os.environ.get(v)]
     raise ValueError(f"❌ Отсутствуют: {', '.join(missing)}")
 
 # ===== ХРАНИЛИЩА =====
@@ -196,43 +192,35 @@ while True:
                 gender = determine_gender(sender)
                 quoted = get_quoted_text(msg)
                 
-                # 👇 1. УДАЛЕНИЯ (проверяем по editedMessageId или deletedMessageId)
-                if msg.get('editedMessageId') or msg.get('deletedMessageId'):
-                    # Это уведомление об удалении/редактировании, пропускаем
-                    processed_ids.add(msg_id)
-                    continue
+                # ===== СТАРЫЕ РАБОЧИЕ БЛОКИ =====
                 
-                # 👇 2. Если сообщение отмечено как удалённое в истории
-                if msg.get('isDeleted') or msg.get('typeMessage') == 'deletedMessage':
+                # УДАЛЕНИЯ (из старого рабочего кода)
+                if msg.get('isDeleted'):
                     if msg_id not in sent_deletes:
-                        # Ищем оригинальное сообщение
-                        original_id = msg.get('editedMessageId') or msg_id
-                        deleted_text = message_cache.get(original_id, 'Текст сообщения недоступен')
-                        action = "удалила" if gender == "женский" else "удалил"
-                        full_text = f"{quoted}🗑️ {sender} {action} сообщение:\n\n{deleted_text}"
+                        deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
+                        full_text = f"{quoted}🗑️ {sender} удалил сообщение:\n\n{deleted_text}"
                         if send_telegram(full_text):
                             sent_deletes.add(msg_id)
                             processed_ids.add(msg_id)
-                            stats['sent'] += 1
                             print(f"🗑️ Удаление от {sender}")
                     continue
                 
-                # 👇 3. РЕДАКТИРОВАНИЯ
+                # РЕДАКТИРОВАНИЯ (из старого рабочего кода)
                 if msg.get('isEdited'):
                     edit_key = f"edit_{msg_id}"
                     if edit_key not in sent_edits:
                         text = msg.get('textMessage', '')
                         if text:
-                            action = "отредактировала" if gender == "женский" else "отредактировал"
-                            full_text = f"{quoted}✏️ {sender} {action} сообщение:\n\n{text}"
+                            full_text = f"{quoted}✏️ {sender} отредактировал сообщение:\n\n{text}"
                             if send_telegram(full_text):
                                 sent_edits.add(edit_key)
                                 processed_ids.add(msg_id)
-                                stats['sent'] += 1
                                 print(f"✏️ Редактирование от {sender}")
                     continue
                 
-                # 👇 4. ОБЫЧНЫЙ ТЕКСТ
+                # ===== НОВЫЙ КОД ДЛЯ ВСЕГО ОСТАЛЬНОГО =====
+                
+                # ТЕКСТ
                 if msg_type == 'textMessage':
                     text = msg.get('textMessage', '')
                     if text:
@@ -242,7 +230,7 @@ while True:
                             stats['sent'] += 1
                             print(f"📨 Текст от {sender}")
                 
-                # 👇 5. ССЫЛКИ
+                # ССЫЛКИ
                 elif msg_type == 'extendedTextMessage':
                     ext = msg.get('extendedTextMessageData', {})
                     text = ext.get('text', '')
@@ -262,7 +250,7 @@ while True:
                         stats['sent'] += 1
                         print(f"🔗 Ссылка от {sender}")
                 
-                # 👇 6. ФОТО
+                # ФОТО
                 elif msg_type == 'imageMessage':
                     photo_url = msg.get('downloadUrl')
                     caption = msg.get('caption', '')
@@ -278,7 +266,19 @@ while True:
                         else:
                             print(f"❌ Ошибка фото от {sender}")
                 
-                # 👇 7. ОСТАЛЬНОЕ
+                # ВИДЕО, ДОКУМЕНТЫ, АУДИО
+                elif msg_type in ['videoMessage', 'documentMessage', 'audioMessage']:
+                    file_data = msg.get('fileMessageData', {})
+                    download_url = file_data.get('downloadUrl')
+                    caption = file_data.get('caption', '')
+                    file_name = file_data.get('fileName', 'file')
+                    
+                    if download_url:
+                        # Пока просто логируем, можно добавить позже
+                        print(f"📎 {msg_type} от {sender}: {file_name}")
+                        processed_ids.add(msg_id)
+                
+                # ОСТАЛЬНОЕ
                 else:
                     processed_ids.add(msg_id)
                     print(f"⏭️ Пропущен тип: {msg_type}")
