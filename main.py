@@ -344,7 +344,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ПОЛНАЯ ВЕРСИЯ С МЕДИА)")
+print("🚀 МОСТ MAX → TELEGRAM (ПОЛНАЯ ВЕРСИЯ С ДИАГНОСТИКОЙ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -356,7 +356,8 @@ print("👤 Твои сообщения: @scul_k")
 print("🖼️ Медиа (фото/видео/файлы) поддерживаются")
 print("✏️ Редактирование поддерживается")
 print("🗑️ Удаление поддерживается")
-print("💬 Цитирование поддерживается\n")
+print("💬 Цитирование поддерживается")
+print("🔍 Диагностика включена - все нетекстовые сообщения будут показаны в логах\n")
 
 last_cleanup = time.time()
 last_message_time = 0
@@ -398,6 +399,15 @@ while True:
                 # ПОЛУЧАЕМ ОБЩУЮ ИНФОРМАЦИЮ
                 msg_type = msg.get('typeMessage')
                 sender_name = get_sender_name(msg)
+
+                # 👇 ДИАГНОСТИКА ДЛЯ НЕТЕКСТОВЫХ СООБЩЕНИЙ
+                if msg_type not in ['textMessage', 'extendedTextMessage']:
+                    print(f"\n📸 НЕТЕКСТОВОЕ СООБЩЕНИЕ!")
+                    print(f"   Тип: {msg_type}")
+                    print(f"   ID: {msg_id}")
+                    print(f"   От: {sender_name}")
+                    print(f"   Полные данные: {json.dumps(msg, indent=2, ensure_ascii=False)}")
+                    print("-" * 50)
                 
                 # Получаем информацию об ответе
                 reply_info = ""
