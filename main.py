@@ -144,6 +144,7 @@ def send_media_to_telegram(file_url, sender_name, caption, msg_type, file_name, 
     """Скачивает файл из MAX и отправляет его в Telegram"""
     try:
         print(f"📤 Отправка медиа: {msg_type}, файл: {file_name}")
+        print(f"📥 Скачиваю файл...")
         
         # Скачиваем файл
         file_response = requests.get(file_url, timeout=30)
@@ -153,7 +154,7 @@ def send_media_to_telegram(file_url, sender_name, caption, msg_type, file_name, 
         
         file_content = file_response.content
         file_size = len(file_content)
-        print(f"📦 Размер файла: {file_size} байт")
+        print(f"📦 Размер файла: {file_size} байт ({file_size/1024/1024:.2f} MB)")
         
         # Проверка лимита Telegram (50 MB)
         if file_size > 50 * 1024 * 1024:
@@ -161,11 +162,6 @@ def send_media_to_telegram(file_url, sender_name, caption, msg_type, file_name, 
             requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
                          json={"chat_id": TELEGRAM_CHAT_ID, "text": error_text})
             return False
-        
-        # Определяем метод отправки
-        tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/"
-        files = None
-        data = {"chat_id": TELEGRAM_CHAT_ID}
         
         # Формируем подпись
         if reply_info:
@@ -176,30 +172,36 @@ def send_media_to_telegram(file_url, sender_name, caption, msg_type, file_name, 
         if caption:
             full_caption += f"\n{caption}"
         
-        # Выбираем метод в зависимости от типа
+        # ВАЖНО: Всегда пытаемся отправить фото как фото
         if msg_type == 'imageMessage':
-            tg_url += "sendPhoto"
+            print(f"🖼️ Отправка как фото...")
+            tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
             files = {'photo': (file_name, file_content)}
-            data['caption'] = full_caption[:1024]
-            print(f"🖼️ Отправка как фото")
+            data = {
+                'chat_id': TELEGRAM_CHAT_ID,
+                'caption': full_caption[:1024]
+            }
+            response = requests.post(tg_url, data=data, files=files, timeout=30)
+            
+            # Если не получилось как фото, пробуем как документ
+            if response.status_code != 200:
+                print(f"⚠️ Не удалось отправить как фото, пробую как документ...")
+                tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+                files = {'document': (file_name, file_content)}
+                response = requests.post(tg_url, data=data, files=files, timeout=30)
         else:
-            tg_url += "sendDocument"
+            # Для остальных типов - как документ
+            print(f"📎 Отправка как документ...")
+            tg_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
             files = {'document': (file_name, file_content)}
-            
-            if msg_type == 'videoMessage':
-                full_caption = f"🎥 {full_caption}"
-            elif msg_type == 'audioMessage':
-                full_caption = f"🎵 {full_caption}"
-            elif msg_type == 'documentMessage':
-                full_caption = f"📄 {full_caption}"
-            
-            data['caption'] = full_caption[:1024]
-            print(f"📎 Отправка как документ")
-        
-        response = requests.post(tg_url, data=data, files=files, timeout=30)
+            data = {
+                'chat_id': TELEGRAM_CHAT_ID,
+                'caption': full_caption[:1024]
+            }
+            response = requests.post(tg_url, data=data, files=files, timeout=30)
         
         if response.status_code == 200:
-            print(f"✅ Медиа отправлено успешно")
+            print(f"✅ Успешно отправлено!")
             return True
         else:
             print(f"❌ Ошибка Telegram: {response.status_code}")
