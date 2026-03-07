@@ -156,7 +156,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (ТОТАЛЬНАЯ ДИАГНОСТИКА)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -220,23 +220,23 @@ while True:
                 sender = get_sender_name(msg)
                 quoted = get_quoted_text(msg)
                 
-                # ===== ТЕКСТ И ССЫЛКИ ВМЕСТЕ =====
-                if msg_type in ['textMessage', 'extendedTextMessage']:
-                    # Получаем текст в зависимости от типа
-                    if msg_type == 'textMessage':
-                        text = msg.get('textMessage', '')
-                    else:
-                        # Для extendedTextMessage берём поле 'text' из extendedTextMessageData
-                        ext = msg.get('extendedTextMessageData', {})
-                        text = ext.get('text', '')
-                    
-                    # Если текст есть - отправляем
+                # 👇 ДИАГНОСТИКА ЛЮБОГО НЕОБРАБОТАННОГО СООБЩЕНИЯ
+                print(f"\n📦 НОВЫЙ ТИП СООБЩЕНИЯ!")
+                print(f"   Тип: {msg_type}")
+                print(f"   ID: {msg_id}")
+                print(f"   От: {sender}")
+                print(f"   Полные данные: {json.dumps(msg, indent=2, ensure_ascii=False)}")
+                print("=" * 60)
+                
+                # ТЕКСТ
+                if msg_type == 'textMessage':
+                    text = msg.get('textMessage', '')
                     if text:
                         full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
                         if send_telegram(full_text):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"📨 Сообщение от {sender}")
+                            print(f"✅ Текст отправлен")
                 
                 # ФОТО
                 elif msg_type == 'imageMessage':
@@ -250,14 +250,14 @@ while True:
                         if send_photo(photo_url, cap):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"📸 Фото от {sender}")
+                            print(f"✅ Фото отправлен")
                         else:
-                            print(f"❌ Ошибка фото от {sender}")
+                            print(f"❌ Ошибка фото")
                 
-                # ОСТАЛЬНОЕ
+                # ОСТАЛЬНОЕ - всё равно добавим в processed, чтобы не спамило
                 else:
                     processed_ids.add(msg_id)
-                    print(f"⏭️ Пропущен тип: {msg_type}")
+                    print(f"⏭️ Необработанный тип: {msg_type}")
         
         # Очистка
         if time.time() - last_cleanup > 60:
