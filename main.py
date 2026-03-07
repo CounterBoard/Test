@@ -36,26 +36,22 @@ def get_chat_history(count=20):
         if response.status_code == 200:
             return response.json()
         return []
-    except Exception as e:
-        print(f"Ошибка истории: {e}")
+    except:
         return []
 
 def update_cache(history):
-    """Обновляет кэш сообщений"""
     for msg in history:
         msg_id = msg.get('idMessage')
         if msg_id and msg.get('typeMessage') == 'textMessage':
             message_cache[msg_id] = msg.get('textMessage', '')
 
-# ===== ОТПРАВКА В TELEGRAM =====
 def send_telegram(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
         data = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
-        response = requests.post(url, json=data, timeout=10)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Ошибка отправки: {e}")
+        requests.post(url, json=data, timeout=10)
+        return True
+    except:
         return False
 
 def send_photo(photo_url, caption):
@@ -67,34 +63,10 @@ def send_photo(photo_url, caption):
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {'photo': ('photo.jpg', photo_response.content)}
         data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': caption[:1024]}
-        response = requests.post(url, data=data, files=files, timeout=30)
-        return response.status_code == 200
-    except Exception as e:
-        print(f"Ошибка фото: {e}")
+        requests.post(url, data=data, files=files, timeout=30)
+        return True
+    except:
         return False
-
-def send_history_to_telegram(chat_id, count=10):
-    """Отправляет историю сообщений"""
-    history = get_chat_history(count)
-    if not history:
-        send_telegram("📭 Нет сообщений в истории")
-        return
-    
-    messages = []
-    for msg in history[-count:]:
-        if msg.get('typeMessage') != 'textMessage':
-            continue
-        sender = get_sender_name(msg)
-        text = msg.get('textMessage', '')
-        if text:
-            time_str = datetime.fromtimestamp(msg.get('timestamp', 0)).strftime('%H:%M')
-            messages.append(f"[{time_str}] {sender}:\n{text[:100]}")
-    
-    if messages:
-        full_text = "📜 История чата:\n\n" + "\n\n---\n\n".join(messages)
-        send_telegram(full_text[:4000])
-    else:
-        send_telegram("📭 В истории нет текстовых сообщений")
 
 def get_sender_name(msg):
     if msg.get('type') == 'incoming':
@@ -103,7 +75,6 @@ def get_sender_name(msg):
         return "@scul_k"
 
 def get_quoted_text(msg):
-    """Извлекает текст цитируемого сообщения с пустой строкой после"""
     if 'quotedMessage' in msg:
         quoted = msg['quotedMessage']
         quoted_text = quoted.get('textMessage', '')
@@ -121,30 +92,6 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
         self.wfile.write(b"Bridge is running")
-    
-    def do_POST(self):
-        content_length = int(self.headers.get('Content-Length', 0))
-        post_data = self.rfile.read(content_length)
-        
-        if content_length > 0:
-            try:
-                update = json.loads(post_data)
-                if 'message' in update and 'text' in update['message']:
-                    text = update['message']['text']
-                    chat_id = update['message']['chat']['id']
-                    if str(chat_id) == str(TELEGRAM_CHAT_ID) and text.startswith('/h'):
-                        parts = text.split()
-                        count = 10
-                        if len(parts) > 1 and parts[1].isdigit():
-                            count = int(parts[1])
-                        send_history_to_telegram(chat_id, count)
-            except:
-                pass
-        
-        self.send_response(200)
-        self.end_headers()
-        self.wfile.write(b"OK")
-    
     def log_message(self, *args): pass
 
 def run_server():
@@ -156,7 +103,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ИСПРАВЛЕННЫЕ ССЫЛКИ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ССЫЛКАМИ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -177,7 +124,6 @@ while True:
                 if not msg_id or msg_id in processed_ids:
                     continue
                 
-                # Пропускаем старые
                 if time.time() - msg.get('timestamp', 0) > 60:
                     processed_ids.add(msg_id)
                     continue
@@ -185,14 +131,13 @@ while True:
                 # ===== УДАЛЕНИЯ =====
                 if msg.get('isDeleted'):
                     if msg_id not in sent_deletes:
-                        deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
+                        deleted_text = message_cache.get(msg_id, 'Текст сообщения недоступен')
                         quoted = get_quoted_text(msg)
                         sender = get_sender_name(msg)
                         full_text = f"{quoted}🗑️ {sender} удалил(а) сообщение:\n\n{deleted_text}"
                         if send_telegram(full_text):
                             sent_deletes.add(msg_id)
                             processed_ids.add(msg_id)
-                            print(f"🗑️ Удаление от {sender}")
                     continue
                 
                 # ===== РЕДАКТИРОВАНИЯ =====
@@ -207,20 +152,9 @@ while True:
                             if send_telegram(full_text):
                                 sent_edits.add(edit_key)
                                 processed_ids.add(msg_id)
-                                print(f"✏️ Редактирование от {sender}")
                     continue
                 
                 # ===== ВСЁ ОСТАЛЬНОЕ =====
-                
-                # Пропускаем уже обработанные
-                if msg_id in processed_ids:
-                    continue
-                
-                # Пропускаем старые сообщения
-                if time.time() - msg.get('timestamp', 0) > 60:
-                    processed_ids.add(msg_id)
-                    continue
-                
                 msg_type = msg.get('typeMessage')
                 sender = get_sender_name(msg)
                 quoted = get_quoted_text(msg)
@@ -233,9 +167,8 @@ while True:
                         if send_telegram(full_text):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"📨 Текст от {sender}")
                 
-                # ССЫЛКИ - ИСПРАВЛЕННЫЙ БЛОК
+                # ССЫЛКИ - берём из textMessage (как мы выяснили)
                 elif msg_type == 'extendedTextMessage':
                     text = msg.get('textMessage', '')
                     if text:
@@ -246,7 +179,6 @@ while True:
                     if send_telegram(full_text):
                         processed_ids.add(msg_id)
                         stats['sent'] += 1
-                        print(f"🔗 Ссылка от {sender}")
                 
                 # ФОТО
                 elif msg_type == 'imageMessage':
@@ -260,16 +192,11 @@ while True:
                         if send_photo(photo_url, cap):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"📸 Фото от {sender}")
-                        else:
-                            print(f"❌ Ошибка фото от {sender}")
                 
                 # ОСТАЛЬНОЕ
                 else:
                     processed_ids.add(msg_id)
-                    print(f"⏭️ Пропущен тип: {msg_type}")
         
-        # Очистка
         if time.time() - last_cleanup > 60:
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
@@ -284,7 +211,7 @@ while True:
         time.sleep(1)
         
     except KeyboardInterrupt:
-        print("\n\n👋 Скрипт остановлен")
+        print("\n👋 Скрипт остановлен")
         break
     except Exception as e:
         print(f"❌ Ошибка: {e}")
