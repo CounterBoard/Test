@@ -64,13 +64,51 @@ def send_photo(photo_url, caption):
         if photo_response.status_code != 200:
             return False
         
+        if caption:
+            full_caption = f"📨 MAX от {sender_name}:\n\n{caption}"
+        else:
+            full_caption = f"📨 MAX от {sender_name}"
+        
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
         files = {'photo': ('photo.jpg', photo_response.content)}
-        data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': caption[:1024]}
+        data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': full_caption[:1024]}
         response = requests.post(url, data=data, files=files, timeout=30)
         return response.status_code == 200
     except Exception as e:
         print(f"Ошибка фото: {e}")
+        return False
+
+# 👇 НОВАЯ ФУНКЦИЯ ДЛЯ ДОКУМЕНТОВ
+def send_document(file_url, sender_name, file_name, caption=""):
+    """Отправляет документ в Telegram"""
+    try:
+        print(f"📄 Скачиваю документ: {file_name}")
+        file_response = requests.get(file_url, timeout=30)
+        if file_response.status_code != 200:
+            print(f"❌ Ошибка скачивания документа: {file_response.status_code}")
+            return False
+        
+        file_size = len(file_response.content)
+        print(f"📦 Размер: {file_size} байт")
+        
+        # Проверка лимита Telegram (50 MB)
+        if file_size > 50 * 1024 * 1024:
+            error_text = f"⚠️ {sender_name} отправил документ ({file_name}), но он слишком большой для Telegram (>50 MB)."
+            send_telegram(error_text)
+            return False
+        
+        if caption:
+            full_caption = f"📄 {sender_name} отправил документ:\n\n{caption}"
+        else:
+            full_caption = f"📄 {sender_name} отправил документ"
+        
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendDocument"
+        files = {'document': (file_name, file_response.content)}
+        data = {'chat_id': TELEGRAM_CHAT_ID, 'caption': full_caption[:1024]}
+        response = requests.post(url, data=data, files=files, timeout=30)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"❌ Ошибка документа: {e}")
         return False
 
 def send_history_to_telegram(chat_id, count=10):
@@ -194,7 +232,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ДОКУМЕНТАМИ, СУКА!)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -203,6 +241,7 @@ print("🟢 Запущено. Жду сообщения...\n")
 print("📝 Команда /h - последние 10 сообщений")
 print("👤 Твои сообщения: @scul_k")
 print("🖼️ Фото поддерживаются")
+print("📄 Документы ПОДДЕРЖИВАЮТСЯ, блядь!")
 print("✏️ Редактирование: отредактировал(а)")
 print("🗑️ Удаление: удалил(а)")
 print("💬 Цитирование поддерживается")
@@ -303,6 +342,24 @@ while True:
                             print(f"📸 Фото от {sender}")
                         else:
                             print(f"❌ Ошибка фото от {sender}")
+                
+                # 👇 НОВОЕ: ДОКУМЕНТЫ
+                elif msg_type == 'documentMessage':
+                    file_data = msg.get('fileMessageData', {})
+                    file_url = file_data.get('downloadUrl')
+                    file_name = file_data.get('fileName', 'document')
+                    caption = file_data.get('caption', '')
+                    
+                    if file_url:
+                        if send_document(file_url, sender, file_name, caption):
+                            processed_ids.add(msg_id)
+                            stats['sent'] += 1
+                            print(f"📄 Документ от {sender}: {file_name}")
+                        else:
+                            print(f"❌ Ошибка документа от {sender}")
+                    else:
+                        processed_ids.add(msg_id)
+                        print(f"⚠️ Документ от {sender} без ссылки")
                 
                 # ОСТАЛЬНОЕ
                 else:
