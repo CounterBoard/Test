@@ -96,7 +96,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ПОСЛЕДНЯЯ ДИАГНОСТИКА)")
+print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -160,12 +160,20 @@ while True:
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
                 
-                # ССЫЛКИ - ПОЛНАЯ ДИАГНОСТИКА
+                # ССЫЛКИ - ФИНАЛЬНОЕ РЕШЕНИЕ
                 elif msg_type == 'extendedTextMessage':
-                    full_text = f"{quoted}📨 MAX от {sender}:\n\n{str(msg)}"
+                    # Берём текст из поля textMessage (где лежит ссылка)
+                    text = msg.get('textMessage', '')
+                    
+                    if text:
+                        full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
+                    else:
+                        full_text = f"{quoted}📨 MAX от {sender}:\n\n[Ссылка без текста]"
+                    
                     if send_telegram(full_text):
                         processed_ids.add(msg_id)
                         stats['sent'] += 1
+                        print(f"🔗 Ссылка от {sender}")
                 
                 # ФОТО
                 elif msg_type == 'imageMessage':
