@@ -103,7 +103,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (С ССЫЛКАМИ)")
+print("🚀 МОСТ MAX → TELEGRAM (СТАБИЛЬНАЯ ВЕРСИЯ + ССЫЛКИ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -168,9 +168,9 @@ while True:
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
                 
-                # ССЫЛКИ - берём из textMessage (как мы выяснили)
+                # ===== ССЫЛКИ (ДОБАВЛЕНЫ) =====
                 elif msg_type == 'extendedTextMessage':
-                    text = msg.get('textMessage', '')
+                    text = msg.get('textMessage', '')  # Берём из корня сообщения
                     if text:
                         full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
                     else:
