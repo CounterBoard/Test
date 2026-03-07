@@ -2,7 +2,6 @@ import os
 import requests
 import time
 import threading
-import json
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
 
@@ -103,7 +102,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (СТАБИЛЬНАЯ ВЕРСИЯ + ССЫЛКИ)")
+print("🚀 МОСТ MAX → TELEGRAM")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -168,18 +167,6 @@ while True:
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
                 
-                # ===== ССЫЛКИ (ДОБАВЛЕНЫ) =====
-                elif msg_type == 'extendedTextMessage':
-                    text = msg.get('textMessage', '')  # Берём из корня сообщения
-                    if text:
-                        full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
-                    else:
-                        full_text = f"{quoted}📨 MAX от {sender}:\n\n[Ссылка без текста]"
-                    
-                    if send_telegram(full_text):
-                        processed_ids.add(msg_id)
-                        stats['sent'] += 1
-                
                 # ФОТО
                 elif msg_type == 'imageMessage':
                     photo_url = msg.get('downloadUrl')
@@ -190,6 +177,15 @@ while True:
                             cap += f":\n\n{caption}"
                         
                         if send_photo(photo_url, cap):
+                            processed_ids.add(msg_id)
+                            stats['sent'] += 1
+                
+                # ===== ССЫЛКИ (ДОБАВЛЕНЫ) =====
+                elif msg_type == 'extendedTextMessage':
+                    text = msg.get('textMessage', '')
+                    if text:
+                        full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
+                        if send_telegram(full_text):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
                 
