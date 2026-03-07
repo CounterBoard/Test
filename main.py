@@ -156,7 +156,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (С ДИАГНОСТИКОЙ ССЫЛОК)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -177,7 +177,7 @@ while True:
                 if not msg_id:
                     continue
                 
-                # ===== УДАЛЕНИЯ (с универсальным окончанием) =====
+                # ===== УДАЛЕНИЯ =====
                 if msg.get('isDeleted'):
                     if msg_id not in sent_deletes:
                         deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
@@ -190,7 +190,7 @@ while True:
                             print(f"🗑️ Удаление от {sender}")
                     continue
                 
-                # ===== РЕДАКТИРОВАНИЯ (с универсальным окончанием) =====
+                # ===== РЕДАКТИРОВАНИЯ =====
                 if msg.get('isEdited'):
                     edit_key = f"edit_{msg_id}"
                     if edit_key not in sent_edits:
@@ -220,39 +220,49 @@ while True:
                 sender = get_sender_name(msg)
                 quoted = get_quoted_text(msg)
                 
-                # ТЕКСТ и ССЫЛКИ (теперь вместе)
-                if msg_type in ['textMessage', 'extendedTextMessage']:
-                    # Для обычного текста
-                    if msg_type == 'textMessage':
-                        text = msg.get('textMessage', '')
-                        if text:
-                            full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
-                            if send_telegram(full_text):
-                                processed_ids.add(msg_id)
-                                stats['sent'] += 1
-                                print(f"📨 Текст от {sender}")
-                    
-                    # Для ссылок
-                    else:
-                        ext = msg.get('extendedTextMessageData', {})
-                        text = ext.get('text', '')
-                        title = ext.get('title', '')
-                        desc = ext.get('description', '')
-                        
-                        # Берём текст ссылки, если есть, иначе просто ссылку
-                        link_text = text if text else ""
-                        full_text = f"{quoted}📨 MAX от {sender}:"
-                        if link_text:
-                            full_text += f"\n\n{link_text}"
-                        if title:
-                            full_text += f"\n\n🔗 {title}"
-                        if desc:
-                            full_text += f"\n{desc}"
-                        
+                # ТЕКСТ
+                if msg_type == 'textMessage':
+                    text = msg.get('textMessage', '')
+                    if text:
+                        full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
                         if send_telegram(full_text):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"🔗 Ссылка от {sender}")
+                            print(f"📨 Текст от {sender}")
+                
+                # ССЫЛКИ С ДИАГНОСТИКОЙ
+                elif msg_type == 'extendedTextMessage':
+                    ext = msg.get('extendedTextMessageData', {})
+                    text = ext.get('text', '')
+                    title = ext.get('title', '')
+                    desc = ext.get('description', '')
+                    
+                    # 👇 ДИАГНОСТИКА
+                    print(f"\n🔗 ПОЛУЧЕНА ССЫЛКА!")
+                    print(f"   text: {text}")
+                    print(f"   title: {title}")
+                    print(f"   description: {desc}")
+                    print(f"   Все данные: {ext}")
+                    
+                    # Формируем сообщение
+                    full_text = f"{quoted}📨 MAX от {sender}:"
+                    
+                    # Добавляем текст, если есть
+                    if text:
+                        full_text += f"\n\n{text}"
+                    else:
+                        # Если текста нет, добавляем просто ссылку (может быть в другом поле?)
+                        full_text += f"\n\n[Ссылка]"
+                    
+                    if title:
+                        full_text += f"\n\n🔗 {title}"
+                    if desc:
+                        full_text += f"\n{desc}"
+                    
+                    if send_telegram(full_text):
+                        processed_ids.add(msg_id)
+                        stats['sent'] += 1
+                        print(f"✅ Ссылка отправлена")
                 
                 # ФОТО
                 elif msg_type == 'imageMessage':
