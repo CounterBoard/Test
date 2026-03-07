@@ -23,7 +23,7 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 processed_ids = set()
 sent_deletes = set()
 sent_edits = set()
-message_cache = {}  # для текстов удалённых сообщений
+message_cache = {}
 stats = {'total': 0, 'sent': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -39,13 +39,11 @@ def get_chat_history(count=20):
         return []
 
 def update_cache(history):
-    """Сохраняет тексты сообщений для будущих удалений"""
     for msg in history:
         msg_id = msg.get('idMessage')
         if msg_id and msg.get('typeMessage') == 'textMessage':
             message_cache[msg_id] = msg.get('textMessage', '')
 
-# ===== ОТПРАВКА В TELEGRAM =====
 def send_telegram(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -104,7 +102,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -118,7 +116,6 @@ while True:
         history = get_chat_history(30)
         
         if history:
-            # Сохраняем тексты для будущих удалений
             update_cache(history)
             
             for msg in history:
@@ -126,7 +123,6 @@ while True:
                 if not msg_id or msg_id in processed_ids:
                     continue
                 
-                # Пропускаем старые
                 if time.time() - msg.get('timestamp', 0) > 60:
                     processed_ids.add(msg_id)
                     continue
@@ -134,9 +130,7 @@ while True:
                 # ===== УДАЛЕНИЯ =====
                 if msg.get('isDeleted'):
                     if msg_id not in sent_deletes:
-                        # Ищем оригинальный текст в кэше
-                        original_id = msg.get('editedMessageId') or msg_id
-                        deleted_text = message_cache.get(original_id, 'Текст сообщения недоступен')
+                        deleted_text = message_cache.get(msg_id, 'Текст сообщения недоступен')
                         quoted = get_quoted_text(msg)
                         sender = get_sender_name(msg)
                         full_text = f"{quoted}🗑️ {sender} удалил(а) сообщение:\n\n{deleted_text}"
@@ -173,7 +167,7 @@ while True:
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
                 
-                # ССЫЛКИ - берём из textMessage
+                # ССЫЛКИ (НОВЫЙ БЛОК)
                 elif msg_type == 'extendedTextMessage':
                     text = msg.get('textMessage', '')
                     if text:
@@ -202,7 +196,6 @@ while True:
                 else:
                     processed_ids.add(msg_id)
         
-        # Очистка
         if time.time() - last_cleanup > 60:
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
@@ -211,7 +204,6 @@ while True:
             if len(sent_edits) > 100:
                 sent_edits = set(list(sent_edits)[-100:])
             if len(message_cache) > 500:
-                # Оставляем только последние 500 записей
                 message_cache = {k: v for k, v in list(message_cache.items())[-500:]}
             last_cleanup = time.time()
         
