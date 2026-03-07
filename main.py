@@ -26,7 +26,8 @@ if not all([ID_INSTANCE, API_TOKEN, MAX_CHAT_ID, TELEGRAM_BOT_TOKEN, TELEGRAM_CH
 # ===== ХРАНИЛИЩА =====
 processed_ids = set()
 sent_deletes = set()
-message_cache = {}  # для хранения текстов удалённых сообщений
+sent_edits = set()  # 👈 ВОЗВРАЩАЕМ отдельное хранилище для редактирований
+message_cache = {}
 stats = {'total': 0, 'sent': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
@@ -42,7 +43,6 @@ def get_chat_history(count=20):
         return []
 
 def update_cache(history):
-    """Обновляет кэш сообщений"""
     for msg in history:
         msg_id = msg.get('idMessage')
         if msg_id and msg.get('typeMessage') == 'textMessage':
@@ -73,7 +73,6 @@ def send_photo(photo_url, caption):
         return False
 
 def send_history_to_telegram(chat_id, count=10):
-    """Отправляет историю сообщений"""
     history = get_chat_history(count)
     if not history:
         send_telegram("📭 Нет сообщений в истории")
@@ -102,7 +101,6 @@ def get_sender_name(msg):
         return "@scul_k"
 
 def get_quoted_text(msg):
-    """Извлекает текст цитируемого сообщения"""
     if 'quotedMessage' in msg:
         quoted = msg['quotedMessage']
         quoted_text = quoted.get('textMessage', '')
@@ -151,7 +149,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ИСПРАВЛЕННЫЕ ССЫЛКИ)")
+print("🚀 МОСТ MAX → TELEGRAM (ИСПРАВЛЕННАЯ ВЕРСИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -172,7 +170,6 @@ while True:
                 if not msg_id or msg_id in processed_ids:
                     continue
                 
-                # Пропускаем очень старые
                 if time.time() - msg.get('timestamp', 0) > 60:
                     processed_ids.add(msg_id)
                     continue
@@ -181,7 +178,7 @@ while True:
                 sender = get_sender_name(msg)
                 quoted = get_quoted_text(msg)
                 
-                # 1. УДАЛЕНИЯ
+                # 👇 1. УДАЛЕНИЯ
                 if msg.get('isDeleted'):
                     if msg_id not in sent_deletes:
                         deleted_text = message_cache.get(msg_id, 'Текст сообщения недоступен')
@@ -192,17 +189,20 @@ while True:
                             print(f"🗑️ Удаление от {sender}")
                     continue
                 
-                # 2. РЕДАКТИРОВАНИЯ
+                # 👇 2. РЕДАКТИРОВАНИЯ (с отдельным хранилищем)
                 if msg.get('isEdited'):
-                    text = msg.get('textMessage', '')
-                    if text:
-                        full_text = f"{quoted}✏️ {sender} отредактировал(а) сообщение:\n\n{text}"
-                        if send_telegram(full_text):
-                            processed_ids.add(msg_id)
-                            print(f"✏️ Редактирование от {sender}")
+                    edit_key = f"edit_{msg_id}"
+                    if edit_key not in sent_edits:
+                        text = msg.get('textMessage', '')
+                        if text:
+                            full_text = f"{quoted}✏️ {sender} отредактировал(а) сообщение:\n\n{text}"
+                            if send_telegram(full_text):
+                                sent_edits.add(edit_key)
+                                processed_ids.add(msg_id)
+                                print(f"✏️ Редактирование от {sender}")
                     continue
                 
-                # 3. ОБЫЧНЫЙ ТЕКСТ
+                # 👇 3. ОБЫЧНЫЙ ТЕКСТ
                 if msg_type == 'textMessage':
                     text = msg.get('textMessage', '')
                     if text:
@@ -211,9 +211,9 @@ while True:
                             processed_ids.add(msg_id)
                             print(f"📨 Текст от {sender}")
                 
-                # 4. ССЫЛКИ - ИСПРАВЛЕННЫЙ БЛОК
+                # 👇 4. ССЫЛКИ (исправленные)
                 elif msg_type == 'extendedTextMessage':
-                    text = msg.get('textMessage', '')  # Берём из корня сообщения!
+                    text = msg.get('textMessage', '')
                     if text:
                         full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
                         if send_telegram(full_text):
@@ -222,7 +222,7 @@ while True:
                     else:
                         print(f"⚠️ Ссылка от {sender} без текста")
                 
-                # 5. ФОТО
+                # 👇 5. ФОТО
                 elif msg_type == 'imageMessage':
                     photo_url = msg.get('downloadUrl')
                     caption = msg.get('caption', '')
@@ -237,17 +237,19 @@ while True:
                         else:
                             print(f"❌ Ошибка фото от {sender}")
                 
-                # 6. ОСТАЛЬНОЕ
+                # 👇 6. ОСТАЛЬНОЕ
                 else:
                     processed_ids.add(msg_id)
                     print(f"⏭️ Пропущен тип: {msg_type}")
         
-        # Очистка
+        # 👇 Очистка всех хранилищ
         if time.time() - last_cleanup > 60:
             if len(processed_ids) > 500:
                 processed_ids = set(list(processed_ids)[-500:])
             if len(sent_deletes) > 100:
                 sent_deletes = set(list(sent_deletes)[-100:])
+            if len(sent_edits) > 100:
+                sent_edits = set(list(sent_edits)[-100:])
             if len(message_cache) > 500:
                 message_cache = {k: v for k, v in list(message_cache.items())[-500:]}
             last_cleanup = time.time()
