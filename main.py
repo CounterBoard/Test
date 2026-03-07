@@ -96,7 +96,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (УПРОЩЁННЫЙ)")
+print("🚀 МОСТ MAX → TELEGRAM (ПОСЛЕДНЯЯ ДИАГНОСТИКА)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -160,15 +160,9 @@ while True:
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
                 
-                # ССЫЛКИ - УПРОЩЁННЫЙ ВАРИАНТ
+                # ССЫЛКИ - ПОЛНАЯ ДИАГНОСТИКА
                 elif msg_type == 'extendedTextMessage':
-                    ext = msg.get('extendedTextMessageData', {})
-                    
-                    # Превращаем все поля в текст
-                    all_text = str(ext)
-                    
-                    full_text = f"{quoted}📨 MAX от {sender}:\n\n{all_text}"
-                    
+                    full_text = f"{quoted}📨 MAX от {sender}:\n\n{str(msg)}"
                     if send_telegram(full_text):
                         processed_ids.add(msg_id)
                         stats['sent'] += 1
