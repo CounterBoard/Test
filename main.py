@@ -103,16 +103,16 @@ def get_sender_name(msg):
         return "@scul_k"
 
 def get_quoted_text(msg):
-    """Извлекает текст цитируемого сообщения"""
+    """Извлекает текст цитируемого сообщения с пустой строкой после"""
     if 'quotedMessage' in msg:
         quoted = msg['quotedMessage']
         quoted_text = quoted.get('textMessage', '')
         quoted_sender = quoted.get('senderName', '')
         if quoted_text:
             if quoted_sender:
-                return f"↪️ В ответ на {quoted_sender}:\n> {quoted_text}\n\n"
+                return f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
             else:
-                return f"↪️ В ответ на сообщение:\n> {quoted_text}\n\n"
+                return f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
     return ""
 
 # ===== ВЕБ-СЕРВЕР =====
@@ -156,7 +156,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (СТАРЫЕ УДАЛЕНИЯ/РЕДАКТИРОВАНИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -177,22 +177,20 @@ while True:
                 if not msg_id:
                     continue
                 
-                # ===== СТАРЫЕ РАБОЧИЕ БЛОКИ В НАЧАЛЕ =====
-                
-                # УДАЛЕНИЯ (как в старом рабочем коде)
+                # ===== УДАЛЕНИЯ (с универсальным окончанием) =====
                 if msg.get('isDeleted'):
                     if msg_id not in sent_deletes:
                         deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
                         quoted = get_quoted_text(msg)
                         sender = get_sender_name(msg)
-                        full_text = f"{quoted}🗑️ {sender} удалил сообщение:\n\n{deleted_text}"
+                        full_text = f"{quoted}🗑️ {sender} удалил(а) сообщение:\n\n{deleted_text}"
                         if send_telegram(full_text):
                             sent_deletes.add(msg_id)
                             processed_ids.add(msg_id)
                             print(f"🗑️ Удаление от {sender}")
                     continue
                 
-                # РЕДАКТИРОВАНИЯ (как в старом рабочем коде)
+                # ===== РЕДАКТИРОВАНИЯ (с универсальным окончанием) =====
                 if msg.get('isEdited'):
                     edit_key = f"edit_{msg_id}"
                     if edit_key not in sent_edits:
@@ -200,14 +198,14 @@ while True:
                         if text:
                             quoted = get_quoted_text(msg)
                             sender = get_sender_name(msg)
-                            full_text = f"{quoted}✏️ {sender} отредактировал сообщение:\n\n{text}"
+                            full_text = f"{quoted}✏️ {sender} отредактировал(а) сообщение:\n\n{text}"
                             if send_telegram(full_text):
                                 sent_edits.add(edit_key)
                                 processed_ids.add(msg_id)
                                 print(f"✏️ Редактирование от {sender}")
                     continue
                 
-                # ===== ДАЛЬШЕ ВСЁ ОСТАЛЬНОЕ =====
+                # ===== ВСЁ ОСТАЛЬНОЕ =====
                 
                 # Пропускаем уже обработанные
                 if msg_id in processed_ids:
@@ -222,35 +220,39 @@ while True:
                 sender = get_sender_name(msg)
                 quoted = get_quoted_text(msg)
                 
-                # ТЕКСТ
-                if msg_type == 'textMessage':
-                    text = msg.get('textMessage', '')
-                    if text:
-                        full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
+                # ТЕКСТ и ССЫЛКИ (теперь вместе)
+                if msg_type in ['textMessage', 'extendedTextMessage']:
+                    # Для обычного текста
+                    if msg_type == 'textMessage':
+                        text = msg.get('textMessage', '')
+                        if text:
+                            full_text = f"{quoted}📨 MAX от {sender}:\n\n{text}"
+                            if send_telegram(full_text):
+                                processed_ids.add(msg_id)
+                                stats['sent'] += 1
+                                print(f"📨 Текст от {sender}")
+                    
+                    # Для ссылок
+                    else:
+                        ext = msg.get('extendedTextMessageData', {})
+                        text = ext.get('text', '')
+                        title = ext.get('title', '')
+                        desc = ext.get('description', '')
+                        
+                        # Берём текст ссылки, если есть, иначе просто ссылку
+                        link_text = text if text else ""
+                        full_text = f"{quoted}📨 MAX от {sender}:"
+                        if link_text:
+                            full_text += f"\n\n{link_text}"
+                        if title:
+                            full_text += f"\n\n🔗 {title}"
+                        if desc:
+                            full_text += f"\n{desc}"
+                        
                         if send_telegram(full_text):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"📨 Текст от {sender}")
-                
-                # ССЫЛКИ
-                elif msg_type == 'extendedTextMessage':
-                    ext = msg.get('extendedTextMessageData', {})
-                    text = ext.get('text', '')
-                    title = ext.get('title', '')
-                    desc = ext.get('description', '')
-                    
-                    full_text = f"{quoted}📨 MAX от {sender}:"
-                    if text:
-                        full_text += f"\n\n{text}"
-                    if title:
-                        full_text += f"\n\n🔗 {title}"
-                    if desc:
-                        full_text += f"\n{desc}"
-                    
-                    if send_telegram(full_text):
-                        processed_ids.add(msg_id)
-                        stats['sent'] += 1
-                        print(f"🔗 Ссылка от {sender}")
+                            print(f"🔗 Ссылка от {sender}")
                 
                 # ФОТО
                 elif msg_type == 'imageMessage':
