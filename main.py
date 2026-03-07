@@ -28,7 +28,7 @@ message_cache = {}
 stats = {'total': 0, 'sent': 0, 'skipped': 0}
 
 # ===== ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ИСТОРИИ =====
-def get_chat_history(count=10):
+def get_chat_history(count=20):
     url = f"https://api.green-api.com/waInstance{ID_INSTANCE}/GetChatHistory/{API_TOKEN}"
     payload = {"chatId": MAX_CHAT_ID, "count": min(count, 100)}
     try:
@@ -112,7 +112,6 @@ def send_history_to_telegram(chat_id, count=10):
                  json={"chat_id": chat_id, "text": full_text})
 
 def send_photo_to_telegram(photo_url, sender_name, caption=""):
-    """Отправляет фото в Telegram"""
     try:
         photo_response = requests.get(photo_url, timeout=30)
         if photo_response.status_code != 200:
@@ -132,7 +131,6 @@ def send_photo_to_telegram(photo_url, sender_name, caption=""):
         return False
 
 def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_id=None):
-    """Отправляет текстовое сообщение в Telegram"""
     if is_edit and edit_id and edit_id in sent_edits:
         return False
     
@@ -158,7 +156,6 @@ def send_text_to_telegram(text, sender_name, reply_info="", is_edit=False, edit_
         return False
 
 def send_deleted_notification(sender_name, deleted_text, delete_id):
-    """Отправляет уведомление об удалении сообщения в Telegram"""
     if delete_id and delete_id in sent_deletes:
         return False
     
@@ -268,7 +265,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (БЕЗ ДУБЛЕЙ)")
+print("🚀 МОСТ MAX → TELEGRAM (ИСПРАВЛЕННАЯ ВЕРСИЯ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -292,14 +289,11 @@ while True:
         if history and isinstance(history, list):
             update_message_cache(history)
             
-            # Сначала собираем ID всех сообщений в истории, чтобы избежать дублей
-            current_ids = {msg.get('idMessage') for msg in history if msg.get('idMessage')}
-            
             # УДАЛЕНИЯ ИЗ ИСТОРИИ
             for msg in history:
                 if msg.get('isDeleted') and msg.get('idMessage'):
                     msg_id = msg.get('idMessage')
-                    if msg_id not in sent_deletes and msg_id not in processed_ids:
+                    if msg_id not in sent_deletes:
                         print(f"\n🔍 Найдено удалённое сообщение в истории: {msg_id}")
                         
                         if msg.get('type') == 'incoming':
@@ -320,10 +314,7 @@ while True:
                 if not msg_id:
                     continue
                 
-                # Пропускаем всё, что уже обработано
-                if msg_id in processed_ids:
-                    continue
-                
+                # РЕДАКТИРОВАНИЯ (в приоритете)
                 if is_edited:
                     edit_key = f"edit_{msg_id}"
                     if edit_key in sent_edits:
@@ -360,6 +351,10 @@ while True:
                     else:
                         stats['skipped'] += 1
                     
+                    continue
+                
+                # Пропускаем уже обработанные
+                if msg_id in processed_ids:
                     continue
                 
                 # ФОТО
