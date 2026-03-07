@@ -111,7 +111,6 @@ def send_history_to_telegram(chat_id, count=10):
     requests.post(f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage", 
                  json={"chat_id": chat_id, "text": full_text})
 
-# 👇 НОВАЯ ФУНКЦИЯ ДЛЯ ФОТО
 def send_photo_to_telegram(photo_url, sender_name, caption=""):
     """Отправляет фото в Telegram"""
     try:
@@ -269,7 +268,7 @@ web_thread.start()
 # =====================
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (+ФОТО, +УНИВЕРСАЛЬНЫЕ ОКОНЧАНИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (БЕЗ ДУБЛЕЙ)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -293,11 +292,14 @@ while True:
         if history and isinstance(history, list):
             update_message_cache(history)
             
+            # Сначала собираем ID всех сообщений в истории, чтобы избежать дублей
+            current_ids = {msg.get('idMessage') for msg in history if msg.get('idMessage')}
+            
             # УДАЛЕНИЯ ИЗ ИСТОРИИ
             for msg in history:
                 if msg.get('isDeleted') and msg.get('idMessage'):
                     msg_id = msg.get('idMessage')
-                    if msg_id not in sent_deletes:
+                    if msg_id not in sent_deletes and msg_id not in processed_ids:
                         print(f"\n🔍 Найдено удалённое сообщение в истории: {msg_id}")
                         
                         if msg.get('type') == 'incoming':
@@ -306,7 +308,9 @@ while True:
                             sender_name = "@scul_k"
                         
                         deleted_text = msg.get('textMessage', 'Текст сообщения недоступен')
-                        send_deleted_notification(sender_name, deleted_text, msg_id)
+                        if send_deleted_notification(sender_name, deleted_text, msg_id):
+                            sent_deletes.add(msg_id)
+                            processed_ids.add(msg_id)
             
             # ОБРАБОТКА СООБЩЕНИЙ
             for msg in reversed(history):
@@ -314,6 +318,10 @@ while True:
                 is_edited = msg.get('isEdited', False)
                 
                 if not msg_id:
+                    continue
+                
+                # Пропускаем всё, что уже обработано
+                if msg_id in processed_ids:
                     continue
                 
                 if is_edited:
@@ -346,6 +354,7 @@ while True:
                     
                     if send_text_to_telegram(text, sender_name, reply_info, is_edit=True, edit_id=edit_key):
                         sent_edits.add(edit_key)
+                        processed_ids.add(msg_id)
                         stats['sent'] += 1
                         print(f"✏️ Редактирование от {sender_name}")
                     else:
@@ -353,9 +362,7 @@ while True:
                     
                     continue
                 
-                if msg_id in processed_ids:
-                    continue
-                
+                # ФОТО
                 if msg.get('typeMessage') == 'imageMessage':
                     photo_url = msg.get('downloadUrl')
                     caption = msg.get('caption', '')
@@ -373,45 +380,49 @@ while True:
                             print(f"❌ Ошибка фото")
                     continue
                 
-                if msg.get('typeMessage') != 'textMessage' or msg.get('isDeleted'):
-                    processed_ids.add(msg_id)
-                    continue
-                
-                text = msg.get('textMessage', '')
-                if not text:
-                    processed_ids.add(msg_id)
-                    continue
-                
-                if time.time() - last_message_time < 0.5:
-                    time.sleep(0.5)
-                
-                reply_info = ""
-                if 'quotedMessage' in msg:
-                    quoted = msg['quotedMessage']
-                    quoted_text = quoted.get('textMessage', '')
-                    quoted_sender = quoted.get('senderName', '')
-                    if quoted_text:
-                        if quoted_sender:
-                            reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
+                # ТЕКСТ
+                if msg.get('typeMessage') == 'textMessage' and not msg.get('isDeleted'):
+                    text = msg.get('textMessage', '')
+                    if text:
+                        if time.time() - last_message_time < 0.5:
+                            time.sleep(0.5)
+                        
+                        reply_info = ""
+                        if 'quotedMessage' in msg:
+                            quoted = msg['quotedMessage']
+                            quoted_text = quoted.get('textMessage', '')
+                            quoted_sender = quoted.get('senderName', '')
+                            if quoted_text:
+                                if quoted_sender:
+                                    reply_info = f"↪️ В ответ на {quoted_sender}:\n\n> {quoted_text}\n\n"
+                                else:
+                                    reply_info = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
+                        
+                        if msg.get('type') == 'incoming':
+                            sender_name = msg.get('senderName', 'Неизвестно')
                         else:
-                            reply_info = f"↪️ В ответ на сообщение:\n\n> {quoted_text}\n\n"
+                            sender_name = "@scul_k"
+                        
+                        stats['total'] += 1
+                        
+                        if send_text_to_telegram(text, sender_name, reply_info):
+                            processed_ids.add(msg_id)
+                            stats['sent'] += 1
+                            last_message_time = time.time()
+                            print(f"📨 Текст от {sender_name}")
+                        else:
+                            stats['skipped'] += 1
+                    else:
+                        processed_ids.add(msg_id)
                 
-                if msg.get('type') == 'incoming':
-                    sender_name = msg.get('senderName', 'Неизвестно')
+                # ВСЁ ОСТАЛЬНОЕ
                 else:
-                    sender_name = "@scul_k"
-                
-                stats['total'] += 1
-                
-                if send_text_to_telegram(text, sender_name, reply_info):
-                    processed_ids.add(msg_id)
-                    stats['sent'] += 1
-                    last_message_time = time.time()
-                else:
-                    stats['skipped'] += 1
-                
-                if stats['total'] % 10 == 0:
-                    print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
+                    if msg.get('typeMessage') not in ['textMessage', 'imageMessage']:
+                        processed_ids.add(msg_id)
+                        print(f"⏭️ Пропущен тип: {msg.get('typeMessage')}")
+            
+            if stats['total'] > 0 and stats['total'] % 10 == 0:
+                print(f"📊 Статистика: всего {stats['total']}, отправлено {stats['sent']}")
         
         # Очистка
         if time.time() - last_cleanup > 60:
