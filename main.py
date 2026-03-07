@@ -156,7 +156,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ФИНАЛЬНАЯ ВЕРСИЯ)")
+print("🚀 МОСТ MAX → TELEGRAM (ДИАГНОСТИКА ССЫЛОК)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -230,32 +230,33 @@ while True:
                             stats['sent'] += 1
                             print(f"📨 Текст от {sender}")
                 
-                # ===== ССЫЛКИ (теперь берём text из правильного места) =====
+                # ===== ССЫЛКИ С ДИАГНОСТИКОЙ =====
                 elif msg_type == 'extendedTextMessage':
                     ext = msg.get('extendedTextMessageData', {})
-                    # Берём текст из поля 'text' — именно там лежит то, что нужно [citation:2]
-                    text = ext.get('text', '')
                     
-                    # Формируем сообщение
-                    full_text = f"{quoted}📨 MAX от {sender}:"
+                    # 👇 ДИАГНОСТИКА
+                    print(f"\n🔗 ПОЛУЧЕНА ССЫЛКА!")
+                    print(f"   Все поля: {list(ext.keys())}")
+                    for key, value in ext.items():
+                        print(f"   {key}: {value}")
                     
-                    if text:
-                        full_text += f"\n\n{text}"
+                    # Пробуем собрать текст из всех возможных полей
+                    text_parts = []
+                    
+                    # Проверяем все поля, которые могут содержать текст
+                    for field in ['text', 'title', 'description', 'canonicalUrl', 'matchedText']:
+                        if ext.get(field):
+                            text_parts.append(ext.get(field))
+                    
+                    if text_parts:
+                        full_text = f"{quoted}📨 MAX от {sender}:\n\n" + "\n".join(text_parts)
                     else:
-                        full_text += f"\n\n[Ссылка без текста]"
-                    
-                    # Добавляем заголовок и описание, если они есть (для красоты)
-                    title = ext.get('title', '')
-                    description = ext.get('description', '')
-                    if title:
-                        full_text += f"\n\n🔗 {title}"
-                    if description:
-                        full_text += f"\n{description}"
+                        full_text = f"{quoted}📨 MAX от {sender}:\n\n[Ссылка без текста]"
                     
                     if send_telegram(full_text):
                         processed_ids.add(msg_id)
                         stats['sent'] += 1
-                        print(f"🔗 Ссылка от {sender}")
+                        print(f"✅ Ссылка отправлена")
                 
                 # ===== ФОТО =====
                 elif msg_type == 'imageMessage':
