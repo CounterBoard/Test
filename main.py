@@ -156,7 +156,7 @@ def run_server():
 run_server()
 
 print("=" * 50)
-print("🚀 МОСТ MAX → TELEGRAM (ДИАГНОСТИКА ССЫЛОК)")
+print("🚀 МОСТ MAX → TELEGRAM (ТОТАЛЬНАЯ ДИАГНОСТИКА)")
 print("=" * 50)
 print(f"📱 Инстанс: {ID_INSTANCE}")
 print(f"💬 Чат MAX: {MAX_CHAT_ID}")
@@ -205,7 +205,7 @@ while True:
                                 print(f"✏️ Редактирование от {sender}")
                     continue
                 
-                # ===== ВСЁ ОСТАЛЬНОЕ =====
+                # ===== ВСЁ ОСТАЛЬНОЕ С ТОТАЛЬНОЙ ДИАГНОСТИКОЙ =====
                 
                 # Пропускаем уже обработанные
                 if msg_id in processed_ids:
@@ -220,7 +220,15 @@ while True:
                 sender = get_sender_name(msg)
                 quoted = get_quoted_text(msg)
                 
-                # ===== ТЕКСТ =====
+                # 👇 ТОТАЛЬНАЯ ДИАГНОСТИКА
+                print(f"\n📦 НОВОЕ СООБЩЕНИЕ!")
+                print(f"   Тип: {msg_type}")
+                print(f"   ID: {msg_id}")
+                print(f"   От: {sender}")
+                print(f"   Все данные: {json.dumps(msg, indent=2, ensure_ascii=False)}")
+                print("=" * 60)
+                
+                # ТЕКСТ
                 if msg_type == 'textMessage':
                     text = msg.get('textMessage', '')
                     if text:
@@ -228,37 +236,9 @@ while True:
                         if send_telegram(full_text):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"📨 Текст от {sender}")
+                            print(f"✅ Текст отправлен")
                 
-                # ===== ССЫЛКИ С ДИАГНОСТИКОЙ =====
-                elif msg_type == 'extendedTextMessage':
-                    ext = msg.get('extendedTextMessageData', {})
-                    
-                    # 👇 ДИАГНОСТИКА
-                    print(f"\n🔗 ПОЛУЧЕНА ССЫЛКА!")
-                    print(f"   Все поля: {list(ext.keys())}")
-                    for key, value in ext.items():
-                        print(f"   {key}: {value}")
-                    
-                    # Пробуем собрать текст из всех возможных полей
-                    text_parts = []
-                    
-                    # Проверяем все поля, которые могут содержать текст
-                    for field in ['text', 'title', 'description', 'canonicalUrl', 'matchedText']:
-                        if ext.get(field):
-                            text_parts.append(ext.get(field))
-                    
-                    if text_parts:
-                        full_text = f"{quoted}📨 MAX от {sender}:\n\n" + "\n".join(text_parts)
-                    else:
-                        full_text = f"{quoted}📨 MAX от {sender}:\n\n[Ссылка без текста]"
-                    
-                    if send_telegram(full_text):
-                        processed_ids.add(msg_id)
-                        stats['sent'] += 1
-                        print(f"✅ Ссылка отправлена")
-                
-                # ===== ФОТО =====
+                # ФОТО
                 elif msg_type == 'imageMessage':
                     photo_url = msg.get('downloadUrl')
                     caption = msg.get('caption', '')
@@ -270,11 +250,11 @@ while True:
                         if send_photo(photo_url, cap):
                             processed_ids.add(msg_id)
                             stats['sent'] += 1
-                            print(f"📸 Фото от {sender}")
+                            print(f"📸 Фото отправлен")
                         else:
-                            print(f"❌ Ошибка фото от {sender}")
+                            print(f"❌ Ошибка фото")
                 
-                # ===== ОСТАЛЬНОЕ =====
+                # ОСТАЛЬНОЕ
                 else:
                     processed_ids.add(msg_id)
                     print(f"⏭️ Пропущен тип: {msg_type}")
